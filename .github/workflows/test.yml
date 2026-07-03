@@ -1,0 +1,70 @@
+name: test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  ip-boundary:
+    name: No private Strikaris imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan src/ and tests/ for private-package references
+        run: |
+          # This action is the free tier — the engine stays private by staying
+          # separate. If this job fails, someone imported from a private
+          # Strikaris package. Keep the private logic in netsuite-sdf-analyzer /
+          # strikaris-kernel / strikaris-backend / mirroros.
+          PATTERN='@strikaris/|netsuite-sdf-analyzer|strikaris-kernel|strikaris-backend|mirroros'
+          if grep -rnE "$PATTERN" src/ tests/ 2>/dev/null; then
+            echo "::error::Private Strikaris package reference detected above."
+            exit 1
+          fi
+          echo "Clean — no private-package references found."
+
+  unit:
+    name: Unit tests
+    needs: [ip-boundary]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  dist-fresh:
+    name: dist/ is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - name: Fail if dist/ drifted from source
+        run: |
+          if [ -n "$(git status --porcelain dist/)" ]; then
+            echo "::error::dist/ is out of date. Run 'npm run build' locally and commit the result."
+            git diff dist/
+            exit 1
+          fi
+
+  self-test:
+    name: Run action on sample project
+    needs: [unit, dist-fresh]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run action against fixture
+        uses: ./
+        with:
+          project-path: tests/fixtures/minimal-sdf
+          comment-mode: 'off'
