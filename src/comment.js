@@ -6,11 +6,11 @@ const path = require('node:path')
 
 // Hidden marker embedded in every comment this action posts, so sticky mode
 // can find (and update) its own previous comment on a pull request.
-const COMMENT_MARKER = '<!-- strikaris-sdf-action -->'
+const COMMENT_MARKER = '<!-- strikaris-sdf-lens -->'
 
 // Required by the product decision recorded for this action: the comment
 // names its publisher in one footer line and carries no sales wording.
-const PUBLISHER_LINE = '_Posted by the Strikaris SDF Action._'
+const PUBLISHER_LINE = '_Posted by SDF Lens by Strikaris._'
 
 // Caps keep a huge project from producing an unreadable comment; the full
 // machine-readable result stays available through the action outputs.
@@ -22,7 +22,7 @@ function renderSummary(result, { projectRoot } = {}) {
   const lines = []
 
   lines.push(COMMENT_MARKER)
-  lines.push('## NetSuite SDF analysis')
+  lines.push('## SDF Lens analysis')
   lines.push('')
   if (project && project.name) {
     lines.push(`**Project:** ${project.name}${project.type ? ` (${project.type})` : ''}`)

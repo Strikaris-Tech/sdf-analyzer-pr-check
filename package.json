@@ -1,7 +1,7 @@
 {
-  "name": "netsuite-sdf-action",
+  "name": "sdf-lens",
   "version": "1.0.0",
-  "description": "GitHub Action that analyzes NetSuite SuiteCloud SDF projects and posts a visual pull-request summary.",
+  "description": "SDF Lens by Strikaris — a GitHub Action that analyzes NetSuite SuiteCloud SDF projects and posts a visual pull-request summary.",
   "private": true,
   "main": "dist/index.js",
   "author": "Strikaris",
