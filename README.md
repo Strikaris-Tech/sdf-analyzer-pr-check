@@ -1,1 +1,55 @@
-IyBOZXRTdWl0ZSBTREYgQW5hbHl6ZXIKCkEgZnJlZSBHaXRIdWIgQWN0aW9uIHRoYXQgYW5hbHl6ZXMgYSBOZXRTdWl0ZSBTdWl0ZUNsb3VkIERldmVsb3BtZW50IEZyYW1ld29yayAoU0RGKSBwcm9qZWN0IG9uIGV2ZXJ5IHB1bGwgcmVxdWVzdCBhbmQgcG9zdHMgdGhlIHJlc3VsdHMgYXMgYSBwdWxsLXJlcXVlc3QgY29tbWVudDogYSAqKnNjcmlwdCBpbnZlbnRvcnkqKiwgYSAqKmRlcGVuZGVuY3kgbWFwKiogb2YgdGhlIGBOL2AgbW9kdWxlcyB5b3VyIHNjcmlwdHMgdXNlLCBhbmQgKipzYW5pdHkgY2hlY2tzKiogKGEgbWlzc2luZyBvciB1bnBhcnNlYWJsZSBtYW5pZmVzdCwgc2NyaXB0cyB0aGF0IGZhaWwgdG8gcGFyc2UpLgoKSXQgcnVucyBlbnRpcmVseSBvbiB0aGUgR2l0SHViIHJ1bm5lciBpbnNpZGUgeW91ciBvd24gcmVwb3NpdG9yeS4gWW91ciBjb2RlIG5ldmVyIGxlYXZlcyB5b3VyIEdpdEh1YiBhY2NvdW50LCBhbmQgbm8gU3RyaWthcmlzIHNlcnZlciBpcyBpbnZvbHZlZC4KCiMjIEluc3RhbGwKCkFkZCBhIHdvcmtmbG93IHRvIHlvdXIgcmVwb3NpdG9yeSAoZm9yIGV4YW1wbGUgYC5naXRodWIvd29ya2Zsb3dzL3NkZi1hbmFseXNpcy55bWxgKToKCmBgYHlhbWwKLSB1c2VzOiBTdHJpa2FyaXMtVGVjaC9uZXRzdWl0ZS1zZGYtYWN0aW9uQHYxCiAgd2l0aDoKICAgIHByb2plY3QtcGF0aDogJy4nCmBgYAoKVGhhdCBpcyBhbGwgdGhlIHNldHVwIHRoZXJlIGlzLiBPbiB0aGUgbmV4dCBwdWxsIHJlcXVlc3QsIHRoZSBhbmFseXNpcyBhcHBlYXJzIGFzIGEgY29tbWVudC4KCiMjIFdoYXQgaXQgZG9lcwoKLSAqKlNjcmlwdCBpbnZlbnRvcnkqKiDigJQgZXZlcnkgU3VpdGVTY3JpcHQgdW5kZXIgYEZpbGVDYWJpbmV0L1N1aXRlU2NyaXB0c2AsIHdpdGggaXRzIHR5cGUgKGZyb20gdGhlIGBATlNjcmlwdFR5cGVgIHRhZywgb3IgaW5mZXJyZWQgZnJvbSBpdHMgZW50cnkgcG9pbnRzKSwgaXRzIGBATkFwaVZlcnNpb25gLCBhbmQgaG93IG1hbnkgbW9kdWxlcyBpdCBkZXBlbmRzIG9uLgotICoqRGVwZW5kZW5jeSBtYXAqKiDigJQgdGhlIHVuaXF1ZSBgTi9gIGFuZCBgU3VpdGVTY3JpcHRzL2AgbW9kdWxlcyB1c2VkIGFjcm9zcyB0aGUgcHJvamVjdCwgYW5kIGhvdyBtYW55IHNjcmlwdHMgdXNlIGVhY2ggb25lLgotICoqU2FuaXR5IGNoZWNrcyoqIOKAlCB3YXJuaW5ncyBmb3IgYSBtaXNzaW5nIG9yIHVucGFyc2VhYmxlIGBtYW5pZmVzdC54bWxgLCBhIG1pc3NpbmcgU3VpdGVTY3JpcHRzIGRpcmVjdG9yeSwgYW5kIHNjcmlwdHMgdGhhdCBmYWlsIHRvIHBhcnNlLgoKVXNlZCBhcyBhICoqbWVyZ2UgZ2F0ZSoqOiBzZXQgYGZhaWwtb24taXNzdWVzOiAndHJ1ZSdgIGFuZCB0aGUgcnVuIGZhaWxzIHdoZW4gYW55IHdhcm5pbmcgaXMgZm91bmQsIHNvIGEgYnJva2VuIHNjcmlwdCBjYW5ub3QgbWVyZ2UgdW5ub3RpY2VkLgoKIyMgV2hhdCBpdCBkZWxpYmVyYXRlbHkgZG9lcyBub3QgZG8KClRoZSBmcmVlIHRpZXIgaXMgaW52ZW50b3J5LCBkZXBlbmRlbmN5IG1hcCwgYW5kIHNhbml0eSBjaGVja3Mg4oCUIG5vdGhpbmcgbW9yZS4gSXQgZG9lcyBub3QgbGluayBzY3JpcHRzIHRvIHRoZWlyIGRlcGxveW1lbnQgcmVjb3JkcywgZG9lcyBub3QgZXZhbHVhdGUgZ292ZXJuYW5jZSBvciBjb21wbGlhbmNlIHJ1bGVzLCBhbmQgZG9lcyBub3QgcHJvZHVjZSBkaWFncmFtcyBvciBhdWRpdCByZXBvcnRzLiBJdCBhbHNvIGNvbnRhaW5zIG5vbmUgb2YgdGhlIHBhaWQgYW5hbHl6ZXIncyBjb2RlOiB0aGUgZnJlZSBlbmdpbmUgaXMgYSBzbWFsbCBzdGFuZGFsb25lIGltcGxlbWVudGF0aW9uLCBrZXB0IHNlcGFyYXRlIG9uIHB1cnBvc2UuCgojIyBJbnB1dHMKCnwgSW5wdXQgfCBEZWZhdWx0IHwgRGVzY3JpcHRpb24gfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYHByb2plY3QtcGF0aGAgfCBgLmAgfCBQYXRoIHRvIHRoZSBTREYgcHJvamVjdCByb290ICh0aGUgZGlyZWN0b3J5IGNvbnRhaW5pbmcgYHNyYy9tYW5pZmVzdC54bWxgKS4gfAp8IGBnaXRodWItdG9rZW5gIHwgYCR7eyBnaXRodWIudG9rZW4gfX1gIHwgR2l0SHViIHRva2VuIHVzZWQgdG8gcG9zdCB0aGUgcHVsbC1yZXF1ZXN0IGNvbW1lbnQuIHwKfCBgY29tbWVudC1tb2RlYCB8IGBzdGlja3lgIHwgYHN0aWNreWAgKGVkaXQgdGhlIGV4aXN0aW5nIFN0cmlrYXJpcyBjb21tZW50KSwgYG5ld2AgKG9uZSBjb21tZW50IHBlciBydW4pLCBvciBgb2ZmYCAobm8gY29tbWVudCkuIHwKfCBgZmFpbC1vbi1pc3N1ZXNgIHwgYGZhbHNlYCB8IElmIGB0cnVlYCwgdGhlIEFjdGlvbiBleGl0cyBub24temVybyB3aGVuIGFuYWx5emVyIHdhcm5pbmdzIGFyZSBmb3VuZC4gVXNlZnVsIGFzIGEgbWVyZ2UgZ2F0ZS4gfAoKIyMgT3V0cHV0cwoKfCBPdXRwdXQgfCBEZXNjcmlwdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBgc2NyaXB0LWNvdW50YCB8IE51bWJlciBvZiBTdWl0ZVNjcmlwdHMgZm91bmQgaW4gdGhlIHByb2plY3QuIHwKfCBgZGVwZW5kZW5jeS1jb3VudGAgfCBOdW1iZXIgb2YgdW5pcXVlIGBOL2AgbW9kdWxlIGRlcGVuZGVuY2llcyBkZXRlY3RlZCBhY3Jvc3MgYWxsIHNjcmlwdHMuIHwKfCBgaGFzLWlzc3Vlc2AgfCBgdHJ1ZWAgaWYgdGhlIGFuYWx5emVyIGZsYWdnZWQgYW55IHdhcm5pbmdzIChtYW5pZmVzdCBtaXNzaW5nLCBzY3JpcHQgcGFyc2UgZXJyb3JzLCBldGMuKS4gfAp8IGBzdW1tYXJ5LW1hcmtkb3duYCB8IFRoZSByZW5kZXJlZCBtYXJrZG93biBzdW1tYXJ5IChzYW1lIGFzIHRoZSBQUiBjb21tZW50IGJvZHkpIGZvciBkb3duc3RyZWFtIGNvbnN1bWVycy4gfAoKIyMgR29pbmcgZGVlcGVyCgpGb3IgYSBkZWVwZXIsIGh1bWFuLXJldmlld2VkIGF1ZGl0IG9mIGEgTmV0U3VpdGUgcHJvamVjdCDigJQgZGVwbG95bWVudCBsaW5rYWdlLCBmaW5kaW5ncyB3aXRoIGxpbmUtbGV2ZWwgZXZpZGVuY2UsIGFuZCBhIHJlbWVkaWF0aW9uIHJlcG9ydCDigJQgU3RyaWthcmlzIG9mZmVycyB0aGUgU0RGIEFuYWx5emVyIGF1ZGl0IHNlcnZpY2UuCgojIyBMaWNlbnNlCgpNSVQK
+# NetSuite SDF Analyzer
+
+A free GitHub Action that analyzes a NetSuite SuiteCloud Development Framework (SDF) project on every pull request and posts the results as a pull-request comment: a **script inventory**, a **dependency map** of the `N/` modules your scripts use, and **sanity checks** (a missing or unparseable manifest, scripts that fail to parse).
+
+It runs entirely on the GitHub runner inside your own repository. Your code never leaves your GitHub account, and no Strikaris server is involved.
+
+## Install
+
+Add a workflow to your repository (for example `.github/workflows/sdf-analysis.yml`):
+
+```yaml
+- uses: Strikaris-Tech/netsuite-sdf-action@v1
+  with:
+    project-path: '.'
+```
+
+That is all the setup there is. On the next pull request, the analysis appears as a comment.
+
+## What it does
+
+- **Script inventory** — every SuiteScript under `FileCabinet/SuiteScripts`, with its type (from the `@NScriptType` tag, or inferred from its entry points), its `@NApiVersion`, and how many modules it depends on.
+- **Dependency map** — the unique `N/` and `SuiteScripts/` modules used across the project, and how many scripts use each one.
+- **Sanity checks** — warnings for a missing or unparseable `manifest.xml`, a missing SuiteScripts directory, and scripts that fail to parse.
+
+Used as a **merge gate**: set `fail-on-issues: 'true'` and the run fails when any warning is found, so a broken script cannot merge unnoticed.
+
+## What it deliberately does not do
+
+The free tier is inventory, dependency map, and sanity checks — nothing more. It does not link scripts to their deployment records, does not evaluate governance or compliance rules, and does not produce diagrams or audit reports. It also contains none of the paid analyzer's code: the free engine is a small standalone implementation, kept separate on purpose.
+
+## Inputs
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `project-path` | `.` | Path to the SDF project root (the directory containing `src/manifest.xml`). |
+| `github-token` | `${{ github.token }}` | GitHub token used to post the pull-request comment. |
+| `comment-mode` | `sticky` | `sticky` (edit the existing Strikaris comment), `new` (one comment per run), or `off` (no comment). |
+| `fail-on-issues` | `false` | If `true`, the Action exits non-zero when analyzer warnings are found. Useful as a merge gate. |
+
+## Outputs
+
+| Output | Description |
+| --- | --- |
+| `script-count` | Number of SuiteScripts found in the project. |
+| `dependency-count` | Number of unique `N/` module dependencies detected across all scripts. |
+| `has-issues` | `true` if the analyzer flagged any warnings (manifest missing, script parse errors, etc.). |
+| `summary-markdown` | The rendered markdown summary (same as the PR comment body) for downstream consumers. |
+
+## Going deeper
+
+For a deeper, human-reviewed audit of a NetSuite project — deployment linkage, findings with line-level evidence, and a remediation report — Strikaris offers the SDF Analyzer audit service.
+
+## License
+
+MIT
