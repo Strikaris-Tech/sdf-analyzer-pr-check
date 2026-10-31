@@ -1,4 +1,4 @@
-name: 'SDF Lens'
+name: 'SDF Analyzer — PR Check'
 description: 'Visualize your NetSuite SuiteCloud project on every pull request — script inventory, dependency map, sanity checks. Zero dev setup required.'
 author: 'Strikaris'
 

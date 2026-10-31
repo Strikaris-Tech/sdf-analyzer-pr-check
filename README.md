@@ -1,4 +1,4 @@
-# SDF Lens by Strikaris
+# SDF Analyzer — PR Check by Strikaris
 
 A free GitHub Action that analyzes a NetSuite SuiteCloud Development Framework (SDF) project on every pull request and posts the results as a pull-request comment: a **script inventory**, a **dependency map** of the `N/` modules your scripts use, and **sanity checks** (a missing or unparseable manifest, scripts that fail to parse).
 
@@ -48,7 +48,7 @@ The free tier is inventory, dependency map, and sanity checks — nothing more. 
 
 ## Going deeper
 
-For a deeper, human-reviewed audit of a NetSuite project — deployment linkage, findings with line-level evidence, and a remediation report — Strikaris offers the SDF Analyzer audit service.
+For a deeper, human-reviewed audit of a NetSuite project — deployment linkage, findings with line-level evidence, and a remediation report — Strikaris offers the SDF Analyzer Audit service.
 
 ## License
 
