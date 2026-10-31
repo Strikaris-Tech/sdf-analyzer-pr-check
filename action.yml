@@ -1,0 +1,39 @@
+name: 'NetSuite SDF Analyzer'
+description: 'Visualize your NetSuite SuiteCloud project on every pull request — script inventory, dependency map, sanity checks. Zero dev setup required.'
+author: 'Strikaris'
+
+branding:
+  icon: 'git-branch'
+  color: 'yellow'
+
+inputs:
+  project-path:
+    description: 'Path to the SDF project root (the directory containing src/manifest.xml).'
+    required: false
+    default: '.'
+  github-token:
+    description: 'GitHub token used to post the pull-request comment.'
+    required: false
+    default: ${{ github.token }}
+  comment-mode:
+    description: 'How to post results: `sticky` (edit the existing Strikaris comment), `new` (one comment per run), or `off` (no comment).'
+    required: false
+    default: 'sticky'
+  fail-on-issues:
+    description: 'If `true`, the Action exits non-zero when analyzer warnings are found (parse errors, missing manifests). Useful as a merge gate.'
+    required: false
+    default: 'false'
+
+outputs:
+  script-count:
+    description: 'Number of SuiteScripts found in the project.'
+  dependency-count:
+    description: 'Number of unique N/ module dependencies detected across all scripts.'
+  has-issues:
+    description: '`true` if the analyzer flagged any warnings (manifest missing, script parse errors, etc.).'
+  summary-markdown:
+    description: 'The rendered markdown summary (same as the PR comment body) for downstream consumers.'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+coverage/
+*.tgz
+
+# `dist/` IS committed per GitHub Actions convention (runners don't npm install).
+# Committed by the release workflow.
