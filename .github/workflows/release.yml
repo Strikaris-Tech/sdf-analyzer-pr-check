@@ -1,0 +1,68 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: Publish release + update major tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - name: Fail if dist/ drifted
+        run: |
+          if [ -n "$(git status --porcelain dist/)" ]; then
+            echo "::error::dist/ was not committed with the release. Rebuild and re-tag."
+            exit 1
+          fi
+
+      - name: Determine version
+        id: v
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          MAJOR=$(echo "$TAG" | sed -E 's/^v([0-9]+).*/v\1/')
+          echo "tag=$TAG"   >> $GITHUB_OUTPUT
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+
+      - name: Move major-version tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const major = '${{ steps.v.outputs.major }}';
+            const sha = context.sha;
+            try {
+              await github.rest.git.updateRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${major}`,
+                sha,
+                force: true,
+              });
+              core.info(`Moved ${major} to ${sha}`);
+            } catch (e) {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${major}`,
+                sha,
+              });
+              core.info(`Created ${major} at ${sha}`);
+            }
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.v.outputs.tag, '-') }}
