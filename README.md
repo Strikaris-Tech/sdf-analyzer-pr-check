@@ -9,7 +9,7 @@ It runs entirely on the GitHub runner inside your own repository. Your code neve
 Add a workflow to your repository (for example `.github/workflows/sdf-analysis.yml`):
 
 ```yaml
-- uses: Strikaris-Tech/netsuite-sdf-action@v1
+- uses: Strikaris-Tech/sdf-analyzer-pr-check@v1
   with:
     project-path: '.'
 ```

@@ -26,7 +26,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Strikaris-Tech/netsuite-sdf-action.git"
+    "url": "git+https://github.com/Strikaris-Tech/sdf-analyzer-pr-check.git"
   },
   "keywords": [
     "netsuite",
