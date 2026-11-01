@@ -16,24 +16,51 @@ const PUBLISHER_LINE = '_Posted by SDF Analyzer — PR Check, by Strikaris._'
 // machine-readable result stays available through the action outputs.
 const MAX_SCRIPT_ROWS = 50
 const MAX_DEPENDENCY_ROWS = 25
+const MAX_OUTSIDE_NAMED = 5
 
 function renderSummary(result, { projectRoot } = {}) {
   const { project, scripts, moduleUsage, byType, warnings, stats } = result
+  const mode = result.mode || 'project'
+  const outsideSuiteScripts = result.outsideSuiteScripts || []
   const lines = []
 
   lines.push(COMMENT_MARKER)
   lines.push('## SDF Analyzer — PR Check')
   lines.push('')
+  if (mode === 'loose') {
+    lines.push(
+      '_No SDF project was found in this repository — loose-file mode: ' +
+      'an inventory of the SuiteScript files detected by their ' +
+      '`@NApiVersion` and `@NScriptType` annotations._',
+    )
+    lines.push('')
+  }
+  if (mode === 'empty') {
+    // A bare zero would read as a clean pass; say plainly what happened.
+    lines.push('**No SDF project and no SuiteScript files were found in this repository.**')
+    lines.push('')
+  }
   if (project && project.name) {
     lines.push(`**Project:** ${project.name}${project.type ? ` (${project.type})` : ''}`)
     lines.push('')
   }
-  lines.push(
-    `**${stats.scriptCount}** script${plural(stats.scriptCount)} · ` +
-    `**${stats.dependencyCount}** unique module dependencies · ` +
-    `**${stats.warningCount}** issue${plural(stats.warningCount)}`,
-  )
+  if (mode === 'loose') {
+    lines.push(
+      `**${stats.scriptCount}** script${plural(stats.scriptCount)} · ` +
+      `**${stats.dependencyCount}** unique module dependencies`,
+    )
+  } else {
+    lines.push(
+      `**${stats.scriptCount}** script${plural(stats.scriptCount)} · ` +
+      `**${stats.dependencyCount}** unique module dependencies · ` +
+      `**${stats.warningCount}** issue${plural(stats.warningCount)}`,
+    )
+  }
   lines.push('')
+  if (outsideSuiteScripts.length > 0) {
+    lines.push(outsideNote(outsideSuiteScripts))
+    lines.push('')
+  }
 
   lines.push('### Scripts by type')
   lines.push('')
@@ -80,21 +107,37 @@ function renderSummary(result, { projectRoot } = {}) {
   }
   lines.push('')
 
-  lines.push('### Issues')
-  lines.push('')
-  if (warnings.length === 0) {
-    lines.push('No issues found.')
-  } else {
-    for (const w of warnings) {
-      lines.push(`- \`${displayPath(w.file, projectRoot)}\` — ${w.message}`)
+  // Loose mode is inventory only: no sanity section is transplanted into it.
+  if (mode !== 'loose') {
+    lines.push('### Issues')
+    lines.push('')
+    if (warnings.length === 0) {
+      lines.push('No issues found.')
+    } else {
+      for (const w of warnings) {
+        lines.push(`- \`${displayPath(w.file, projectRoot)}\` — ${w.message}`)
+      }
     }
+    lines.push('')
   }
-  lines.push('')
   lines.push('---')
   lines.push(PUBLISHER_LINE)
   lines.push('')
 
   return lines.join('\n')
+}
+
+// One line in the project-mode comment for annotated SuiteScript files that
+// sit outside the project's SuiteScripts folders: seen, counted, not scanned.
+function outsideNote(files) {
+  const named = files.slice(0, MAX_OUTSIDE_NAMED).map((f) => `\`${f}\``).join(', ')
+  const more = files.length > MAX_OUTSIDE_NAMED
+    ? `, and ${files.length - MAX_OUTSIDE_NAMED} more`
+    : ''
+  return (
+    `_Note: ${files.length} annotated SuiteScript file${plural(files.length)} found ` +
+    `outside the project's SuiteScripts folder — seen but not scanned: ${named}${more}._`
+  )
 }
 
 function plural(n) {
