@@ -1,5 +1,5 @@
 name: 'SDF Analyzer — PR Check'
-description: 'Visualize your NetSuite SuiteCloud project on every pull request — script inventory, dependency map, sanity checks. Zero dev setup required.'
+description: 'Visualize your NetSuite SuiteCloud project on every pull request — script inventory, dependency map, sanity checks. Also inventories loose SuiteScript files in repositories without an SDF project. Zero dev setup required.'
 author: 'Strikaris'
 
 branding:
@@ -8,7 +8,7 @@ branding:
 
 inputs:
   project-path:
-    description: 'Path to the SDF project root (the directory containing src/manifest.xml).'
+    description: 'Path to the SDF project root (the directory containing src/manifest.xml). If no SDF project is found there, loose SuiteScript files under that path are inventoried instead.'
     required: false
     default: '.'
   github-token:
@@ -26,9 +26,9 @@ inputs:
 
 outputs:
   script-count:
-    description: 'Number of SuiteScripts found in the project.'
+    description: 'Number of SuiteScripts found — in the SDF project, or as loose files when no project is present.'
   dependency-count:
-    description: 'Number of unique N/ module dependencies detected across all scripts.'
+    description: 'Number of unique N/ module dependencies detected across all scripts found.'
   has-issues:
     description: '`true` if the analyzer flagged any warnings (manifest missing, script parse errors, etc.).'
   summary-markdown:
