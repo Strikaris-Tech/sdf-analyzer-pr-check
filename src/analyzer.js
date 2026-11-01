@@ -1,7 +1,10 @@
 // Free-tier SDF analyzer — runs entirely on the GitHub Actions runner.
 //
 // Deliberately minimal: manifest parse, script scan, dependency + export
-// extraction via Acorn, module-usage aggregation. Everything deeper
+// extraction via Acorn, module-usage aggregation. When no SDF project
+// layout is present it degrades to loose-file mode — an inventory of the
+// annotated SuiteScript files in the tree (recognition lives in
+// suitescript.js) — and never to line-level checks. Everything deeper
 // (deployment-XML linkage, consequence analysis, conflict detection,
 // TOGAF-aligned docs) is a paid-tier feature surfaced through Strikaris.
 //
@@ -13,6 +16,12 @@ const path = require('node:path')
 const acorn = require('acorn')
 const walk = require('acorn-walk')
 const { parseStringPromise } = require('xml2js')
+const {
+  extractApiVersion,
+  extractScriptTypeTag,
+  extractLooseDependencies,
+  findSuiteScriptFiles,
+} = require('./suitescript')
 
 const SUITESCRIPT_TYPES = new Set([
   'ClientScript', 'UserEventScript', 'Suitelet', 'ScheduledScript',
@@ -40,11 +49,55 @@ const EXPORT_TO_TYPE = {
   each: 'MassUpdateScript',
 }
 
+// The SuiteScripts folders of an SDF project, in scan priority order,
+// relative to the project root (forward slashes, matching relFile form).
+const SUITESCRIPTS_ROOTS = [
+  'src/FileCabinet/SuiteScripts',
+  'FileCabinet/SuiteScripts',
+]
+
+// Mode selection: an SDF project layout (a manifest, or a SuiteScripts
+// folder) means project mode, exactly as this analyzer has always behaved.
+// Without one, fall back to loose-file mode — an inventory of the annotated
+// SuiteScript files anywhere in the tree — or, when there are none either,
+// an honestly empty result that says so.
 async function analyze(projectRoot) {
   const warnings = []
-  const manifest = await readManifest(projectRoot, warnings)
-  const scripts = await scanScripts(projectRoot, warnings)
+  // Manifest warnings are project-mode sanity output; they are gathered
+  // separately so loose mode — inventory only — never inherits them.
+  const manifestWarnings = []
+  const { manifest, present: manifestPresent } = await probeManifest(projectRoot, manifestWarnings)
+  const suiteRoot = await findSuiteScriptsRoot(projectRoot)
 
+  if (manifestPresent || suiteRoot) {
+    warnings.push(...manifestWarnings)
+    const scripts = []
+    if (suiteRoot) {
+      await walkJs(suiteRoot, projectRoot, scripts, warnings)
+    } else {
+      warnings.push({
+        file: path.join(projectRoot, 'src', 'FileCabinet', 'SuiteScripts'),
+        message: 'No SuiteScripts directory found — skipping script scan.',
+      })
+    }
+    const outsideSuiteScripts = await scanOutsideSuiteScripts(projectRoot)
+    return buildResult({ mode: 'project', project: manifest, scripts, warnings, outsideSuiteScripts })
+  }
+
+  const looseFiles = await findSuiteScriptFiles(projectRoot)
+  if (looseFiles.length === 0) {
+    warnings.push(...manifestWarnings, {
+      file: path.join(projectRoot, 'src', 'FileCabinet', 'SuiteScripts'),
+      message: 'No SuiteScripts directory found — skipping script scan.',
+    })
+    return buildResult({ mode: 'empty', project: manifest, scripts: [], warnings, outsideSuiteScripts: [] })
+  }
+
+  const scripts = looseFiles.map((found) => parseLooseScript(found))
+  return buildResult({ mode: 'loose', project: manifest, scripts, warnings, outsideSuiteScripts: [] })
+}
+
+function buildResult({ mode, project, scripts, warnings, outsideSuiteScripts }) {
   const moduleUsage = new Map()
   const byType = new Map()
 
@@ -56,11 +109,13 @@ async function analyze(projectRoot) {
   }
 
   return {
-    project: manifest,
+    mode,
+    project,
     scripts,
     moduleUsage: sortDesc(moduleUsage),
     byType: sortDesc(byType),
     warnings,
+    outsideSuiteScripts,
     stats: {
       scriptCount: scripts.length,
       dependencyCount: moduleUsage.size,
@@ -70,25 +125,88 @@ async function analyze(projectRoot) {
   }
 }
 
-async function readManifest(projectRoot, warnings) {
+// Annotated SuiteScript files that live outside the project's SuiteScripts
+// folders: project mode sees them but does not scan them, and the summary
+// notes them so a stray script never passes silently.
+async function scanOutsideSuiteScripts(projectRoot) {
+  const found = await findSuiteScriptFiles(projectRoot)
+  return found
+    .filter(({ relFile }) => !SUITESCRIPTS_ROOTS.some(
+      (root) => relFile === root || relFile.startsWith(`${root}/`),
+    ))
+    .map(({ relFile }) => relFile)
+}
+
+// Inventory one loose SuiteScript file. Recognition already established
+// that both annotations are present, so type and API version come from the
+// tags; dependencies come from the AST when the file parses. A file that
+// does not parse is still a SuiteScript — it is listed with no declared
+// dependencies rather than dropped or turned into a warning.
+function parseLooseScript({ relFile, source }) {
+  const tagType = extractScriptTypeTag(source)
+  let type = SUITESCRIPT_TYPES.has(tagType) ? tagType : null
+  let dependencies = []
+  let exports = []
+  const ast = tryParse(source)
+  if (ast) {
+    dependencies = extractLooseDependencies(ast)
+    exports = extractExports(ast)
+    type = guessScriptType(source, exports) || type
+  }
+  return {
+    file: relFile,
+    type,
+    apiVersion: extractApiVersion(source),
+    dependencies,
+    exports,
+    lineCount: source.split('\n').length,
+  }
+}
+
+const PARSE_OPTIONS = {
+  ecmaVersion: 2022,
+  sourceType: 'script',
+  allowReturnOutsideFunction: true,
+  allowHashBang: true,
+}
+
+function tryParse(source) {
+  try {
+    return acorn.parse(source, PARSE_OPTIONS)
+  } catch {
+    return null
+  }
+}
+
+// Reads the manifest and reports whether one is present at all — present
+// but unparseable still counts, because mode selection keys off the layout
+// existing, not off it being valid. Warnings match readManifest's history:
+// a parse failure and a missing manifest are both reported.
+async function probeManifest(projectRoot, warnings) {
   // SDF projects may place manifest.xml at project root OR under src/.
   const candidates = [
     path.join(projectRoot, 'src', 'manifest.xml'),
     path.join(projectRoot, 'manifest.xml'),
   ]
+  let present = false
   for (const file of candidates) {
     try {
       const raw = await fs.readFile(file, 'utf8')
+      present = true
       const xml = await parseStringPromise(raw, { explicitArray: false, mergeAttrs: true })
       const m = xml.manifest || {}
       return {
-        name: (m.projectname || m.name || '').toString().trim() || null,
-        type: (m.projecttype || m.type || '').toString().trim() || null,
-        frameworkVersion: (m.frameworkversion || '').toString().trim() || null,
-        manifestPath: path.relative(projectRoot, file),
+        present,
+        manifest: {
+          name: (m.projectname || m.name || '').toString().trim() || null,
+          type: (m.projecttype || m.type || '').toString().trim() || null,
+          frameworkVersion: (m.frameworkversion || '').toString().trim() || null,
+          manifestPath: path.relative(projectRoot, file),
+        },
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
+        present = true
         warnings.push({ file, message: `manifest.xml parse failed: ${err.message}` })
         break
       }
@@ -98,20 +216,33 @@ async function readManifest(projectRoot, warnings) {
     file: path.join(projectRoot, 'src', 'manifest.xml'),
     message: 'No manifest.xml found — project may not be a valid SDF project.',
   })
-  return { name: null, type: null, frameworkVersion: null, manifestPath: null }
+  return {
+    present,
+    manifest: { name: null, type: null, frameworkVersion: null, manifestPath: null },
+  }
+}
+
+async function readManifest(projectRoot, warnings) {
+  const { manifest } = await probeManifest(projectRoot, warnings)
+  return manifest
+}
+
+// The first existing SuiteScripts folder, or null — without warnings, so
+// mode selection can probe quietly.
+async function findSuiteScriptsRoot(projectRoot) {
+  for (const rel of SUITESCRIPTS_ROOTS) {
+    const root = path.join(projectRoot, rel)
+    if (await exists(root)) return root
+  }
+  return null
 }
 
 async function scanScripts(projectRoot, warnings) {
-  const roots = [
-    path.join(projectRoot, 'src', 'FileCabinet', 'SuiteScripts'),
-    path.join(projectRoot, 'FileCabinet', 'SuiteScripts'),
-  ]
   const scripts = []
-  for (const root of roots) {
-    if (await exists(root)) {
-      await walkJs(root, projectRoot, scripts, warnings)
-      return scripts
-    }
+  const root = await findSuiteScriptsRoot(projectRoot)
+  if (root) {
+    await walkJs(root, projectRoot, scripts, warnings)
+    return scripts
   }
   warnings.push({
     file: path.join(projectRoot, 'src', 'FileCabinet', 'SuiteScripts'),
@@ -145,12 +276,7 @@ async function parseScript(file, projectRoot, warnings) {
 
   let ast
   try {
-    ast = acorn.parse(source, {
-      ecmaVersion: 2022,
-      sourceType: 'script',
-      allowReturnOutsideFunction: true,
-      allowHashBang: true,
-    })
+    ast = acorn.parse(source, PARSE_OPTIONS)
   } catch (err) {
     warnings.push({ file: relFile, message: `parse failed: ${err.message}` })
     return null
@@ -220,16 +346,11 @@ function extractExports(ast) {
   return Array.from(names).sort()
 }
 
-// `@NApiVersion 2.x` jsdoc tag — SuiteScript convention.
-function extractApiVersion(source) {
-  const m = source.match(/@NApiVersion\s+([\d.x]+)/)
-  return m ? m[1] : null
-}
-
-// Use `@NScriptType FooScript` jsdoc if present; fall back to export shape.
+// Use the `@NScriptType FooScript` jsdoc tag if present (extracted by
+// suitescript.js); fall back to export shape.
 function guessScriptType(source, exports) {
-  const tag = source.match(/@NScriptType\s+(\w+)/)
-  if (tag && SUITESCRIPT_TYPES.has(tag[1])) return tag[1]
+  const tag = extractScriptTypeTag(source)
+  if (tag && SUITESCRIPT_TYPES.has(tag)) return tag
   // Vote by exports — pick the most-attested type.
   const votes = new Map()
   for (const name of exports) {
@@ -252,6 +373,7 @@ function sortDesc(map) {
 module.exports = {
   analyze,
   // exported for tests:
-  readManifest, scanScripts, parseScript,
+  readManifest, scanScripts, parseScript, parseLooseScript,
   extractDependencies, extractExports, guessScriptType,
+  extractApiVersion,
 }
