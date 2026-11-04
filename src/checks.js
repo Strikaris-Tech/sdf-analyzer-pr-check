@@ -36,6 +36,7 @@ const {
   resolveCallModules,
 } = require('./suitescript')
 const { guessScriptType, extractExports } = require('./analyzer')
+const { extractCallDiagram } = require('./diagram')
 
 // The six checks, fixed by name in the product ruling. The header line
 // of the comment's checks section counts this list, so the number a
@@ -643,7 +644,14 @@ function subtractFindings(headFindings, baseFindings) {
 //   skipped: null,
 //   findings: [{ check, file, line, message, onAddedLine }],
 //   changedCount, examinedCount, notCompared, notExamined,
+//   diagrams: [{ file, participants, entryPoints, calls,
+//                ambiguousCalls, overCap }],
 // }
+//
+// The diagrams ride along with the examination: the same head sources
+// are already read and parsed here, and src/diagram.js reads each one
+// for its direct intra-file calls. Only examined files contribute —
+// a file the checks could not examine gets no diagram either.
 //
 // mode: the analyzer's mode for the head tree ('project' | 'loose' |
 // 'empty'). projectPrefix: the project root's repository-relative
@@ -697,6 +705,7 @@ async function runPatternChecks({
   let notCompared = 0
   let notExamined = 0
   const findings = []
+  const diagrams = []
 
   for (const f of population) {
     if (examinedCount + notCompared + notExamined >= MAX_CHECK_FILES) {
@@ -750,6 +759,14 @@ async function runPatternChecks({
     }
 
     examinedCount += 1
+    // The diagram is drawn from the head version only, and only when
+    // there is something to draw: at least one direct call, or a file
+    // whose diagram had to be omitted for size (the renderer says so
+    // rather than letting the file vanish from the section silently).
+    const diagram = extractCallDiagram(headSource)
+    if (diagram && (diagram.calls.length > 0 || diagram.overCap)) {
+      diagrams.push({ file: f.displayPath, ...diagram })
+    }
     for (const hit of subtractFindings(headFindings, baseFindings)) {
       findings.push({
         check: hit.check,
@@ -772,6 +789,7 @@ async function runPatternChecks({
     examinedCount,
     notCompared,
     notExamined,
+    diagrams,
   }
 }
 
