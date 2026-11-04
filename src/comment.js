@@ -18,6 +18,7 @@ const PUBLISHER_LINE = '_Posted by SDF Analyzer — PR Check, by Strikaris._'
 const MAX_SCRIPT_ROWS = 50
 const MAX_DEPENDENCY_ROWS = 25
 const MAX_WARNING_ROWS = 25
+const MAX_FINDING_ROWS = 25
 const MAX_OUTSIDE_NAMED = 5
 
 // GitHub rejects a comment body longer than 65,536 characters, and a
@@ -32,10 +33,10 @@ const MAX_COMMENT_CHARS = GITHUB_COMMENT_LIMIT - 4096
 // List sizes tried in order until the rendered summary fits the budget:
 // the standing caps first, then progressively smaller, then counts only.
 const LIST_LIMIT_STAGES = [
-  { scripts: MAX_SCRIPT_ROWS, modules: MAX_DEPENDENCY_ROWS, warnings: MAX_WARNING_ROWS },
-  { scripts: Math.ceil(MAX_SCRIPT_ROWS / 2), modules: Math.ceil(MAX_DEPENDENCY_ROWS / 2), warnings: Math.ceil(MAX_WARNING_ROWS / 2) },
-  { scripts: Math.ceil(MAX_SCRIPT_ROWS / 4), modules: Math.ceil(MAX_DEPENDENCY_ROWS / 4), warnings: Math.ceil(MAX_WARNING_ROWS / 4) },
-  { scripts: 0, modules: 0, warnings: 0 },
+  { scripts: MAX_SCRIPT_ROWS, modules: MAX_DEPENDENCY_ROWS, warnings: MAX_WARNING_ROWS, findings: MAX_FINDING_ROWS },
+  { scripts: Math.ceil(MAX_SCRIPT_ROWS / 2), modules: Math.ceil(MAX_DEPENDENCY_ROWS / 2), warnings: Math.ceil(MAX_WARNING_ROWS / 2), findings: Math.ceil(MAX_FINDING_ROWS / 2) },
+  { scripts: Math.ceil(MAX_SCRIPT_ROWS / 4), modules: Math.ceil(MAX_DEPENDENCY_ROWS / 4), warnings: Math.ceil(MAX_WARNING_ROWS / 4), findings: Math.ceil(MAX_FINDING_ROWS / 4) },
+  { scripts: 0, modules: 0, warnings: 0, findings: 0 },
 ]
 
 const TRUNCATION_NOTE =
@@ -49,6 +50,16 @@ const TRUNCATION_NOTE =
 const DEPS_INCOMPLETE_NOTE =
   '_† Dependency declaration could not be fully read for the marked ' +
   'file(s) — their dependency counts are a lower bound._'
+
+// The pattern-checks section closes with this scope sentence in every
+// rendering, so "no findings shown" can never masquerade as "everything
+// examined": the reader is told exactly what the checks did and did not
+// look at. The Marketplace listing and the README carry the same claim.
+const FINDINGS_SCOPE_SENTENCE =
+  '_Pattern checks examine only the files this pull request changed, ' +
+  'for the six patterns above. They are not an audit: the rest of the ' +
+  'project, data flow within and between files, deployments, roles, ' +
+  'and configuration are not examined._'
 
 // Manifest fields are project-authored text interpolated into a comment
 // posted under the github-actions identity: newlines and markdown
@@ -198,6 +209,13 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
     }
     lines.push('')
   }
+  // The pattern-checks section (R1) sits after Issues in project mode
+  // and after Module dependencies in loose mode. It renders only when
+  // the run carried checks data — pull-request runs; a non-pull-request
+  // run has no section at all, exactly as before.
+  if (result.checks) {
+    lines.push(...renderChecksSection(result.checks, limits.findings))
+  }
   if (budgetTruncated) {
     lines.push(TRUNCATION_NOTE)
     lines.push('')
@@ -207,6 +225,60 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
   lines.push('')
 
   return lines.join('\n')
+}
+
+// The pattern-checks section: its own section, never blended into
+// Issues (whose count drives has-issues and fail-on-issues — a second
+// kind of item there would corrupt both meanings). Its header always
+// enumerates what ran; degradation is printed, not implied; the scope
+// sentence closes every rendering.
+function renderChecksSection(checks, findingRowLimit) {
+  const lines = []
+  lines.push('### Pattern checks on this pull request')
+  lines.push('')
+  if (checks.skipped) {
+    lines.push(`Pattern checks were not run on this pull request: ${checks.skipped}.`)
+    lines.push('')
+    lines.push(FINDINGS_SCOPE_SENTENCE)
+    lines.push('')
+    return lines
+  }
+
+  const findings = checks.findings || []
+  const examined = checks.examinedCount || 0
+  const changed = checks.changedCount || 0
+  const filePhrase = examined === changed
+    ? `**${changed}** changed script file${plural(changed)}`
+    : `**${examined}** of **${changed}** changed script files`
+  const outcome = findings.length === 0
+    ? 'no new findings'
+    : `**${findings.length}** new finding${plural(findings.length)}`
+  lines.push(`**6 pattern checks** ran on ${filePhrase}: ${outcome}.`)
+  lines.push('')
+  for (const f of findings.slice(0, findingRowLimit)) {
+    lines.push(`- \`${f.file}:${f.line}\` — \`${f.check}\` — ${f.message}`)
+  }
+  if (findings.length > findingRowLimit) {
+    lines.push(`- _…and ${findings.length - findingRowLimit} more findings (only the first ${findingRowLimit} are listed)._`)
+  }
+  if (findings.length > 0) lines.push('')
+  if (checks.notCompared > 0) {
+    lines.push(
+      `_${checks.notCompared} changed file${plural(checks.notCompared)} could not be compared ` +
+      `with the base version; ${checks.notCompared === 1 ? 'its findings are' : 'their findings are'} not shown._`,
+    )
+    lines.push('')
+  }
+  if (checks.notExamined > 0) {
+    lines.push(
+      `_${checks.notExamined} changed file${plural(checks.notExamined)} could not be examined ` +
+      `(too large, or not valid JavaScript) and ${checks.notExamined === 1 ? 'was' : 'were'} not checked._`,
+    )
+    lines.push('')
+  }
+  lines.push(FINDINGS_SCOPE_SENTENCE)
+  lines.push('')
+  return lines
 }
 
 // Last-resort budget enforcement: cut the body at a line boundary and
@@ -335,7 +407,10 @@ module.exports = {
   COMMENT_MARKER,
   PUBLISHER_LINE,
   MAX_COMMENT_CHARS,
+  MAX_FINDING_ROWS,
+  FINDINGS_SCOPE_SENTENCE,
   renderSummary,
+  renderChecksSection,
   truncateToBudget,
   upsertComment,
 }
