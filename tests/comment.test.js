@@ -328,3 +328,112 @@ test('D10: fully read declarations carry no marker and no footnote', () => {
   assert.doesNotMatch(md, /†/)
   assert.doesNotMatch(md, /lower bound/)
 })
+
+// ── R1: the pattern-checks section ─────────────────────────────────────
+// A separate section from Issues (whose count drives has-issues and
+// fail-on-issues), rendered only when the run carried checks data,
+// always enumerating what ran and closing with the scope sentence.
+
+const { MAX_FINDING_ROWS, FINDINGS_SCOPE_SENTENCE } = require('../src/comment')
+
+function checksResult(overrides = {}) {
+  return {
+    checks: {
+      skipped: null,
+      findings: [
+        { check: 'hardcoded-credential', file: 'src/FileCabinet/SuiteScripts/a.js', line: 12, message: 'A credential is written directly in the source code.' },
+        { check: 'empty-catch', file: 'src/FileCabinet/SuiteScripts/b.js', line: 30, message: 'Empty catch block.' },
+      ],
+      changedCount: 3,
+      examinedCount: 3,
+      notCompared: 0,
+      notExamined: 0,
+      ...overrides,
+    },
+  }
+}
+
+test('R1: the checks section lists findings with file, line, check, and message', () => {
+  const md = renderSummary(sampleResult(checksResult()))
+  assert.match(md, /### Pattern checks on this pull request/)
+  assert.match(md, /\*\*6 pattern checks\*\* ran on \*\*3\*\* changed script files: \*\*2\*\* new findings\./)
+  assert.match(md, /- `src\/FileCabinet\/SuiteScripts\/a\.js:12` — `hardcoded-credential` — A credential is written/)
+  assert.match(md, /- `src\/FileCabinet\/SuiteScripts\/b\.js:30` — `empty-catch` — Empty catch block\./)
+  assert.ok(md.includes(FINDINGS_SCOPE_SENTENCE))
+  // The section sits after Issues in project mode.
+  assert.ok(md.indexOf('### Issues') < md.indexOf('### Pattern checks'))
+  assert.ok(md.trimEnd().endsWith(PUBLISHER_LINE))
+})
+
+test('R1: a zero-finding run says what ran and never claims a bare clean pass', () => {
+  const md = renderSummary(sampleResult(checksResult({ findings: [] })))
+  assert.match(md, /ran on \*\*3\*\* changed script files: no new findings\./)
+  assert.ok(md.includes(FINDINGS_SCOPE_SENTENCE))
+})
+
+test('R1: a skipped run prints the reason and the scope sentence', () => {
+  const md = renderSummary(sampleResult(checksResult({
+    skipped: 'the base version of the changed files could not be obtained',
+    findings: [],
+  })))
+  assert.match(md, /Pattern checks were not run on this pull request: the base version of the changed files could not be obtained\./)
+  assert.ok(md.includes(FINDINGS_SCOPE_SENTENCE))
+  assert.doesNotMatch(md, /no new findings/)
+})
+
+test('R1: without checks data there is no checks section (non-pull-request runs unchanged)', () => {
+  const md = renderSummary(sampleResult())
+  assert.doesNotMatch(md, /Pattern checks/)
+})
+
+test('R1: loose mode renders the checks section and still has no Issues section', () => {
+  const result = sampleResult(checksResult())
+  result.mode = 'loose'
+  const md = renderSummary(result)
+  assert.match(md, /### Pattern checks on this pull request/)
+  assert.doesNotMatch(md, /### Issues/)
+  assert.ok(md.indexOf('### Module dependencies') < md.indexOf('### Pattern checks'))
+})
+
+test('R1: examined-of-changed arithmetic shows in the header when they differ', () => {
+  const md = renderSummary(sampleResult(checksResult({ examinedCount: 2, changedCount: 5, findings: [] })))
+  assert.match(md, /ran on \*\*2\*\* of \*\*5\*\* changed script files: no new findings\./)
+})
+
+test('R1: findings beyond the row cap are counted, not silently dropped', () => {
+  const findings = Array.from({ length: MAX_FINDING_ROWS + 5 }, (_, i) => ({
+    check: 'empty-catch',
+    file: `src/FileCabinet/SuiteScripts/f${i}.js`,
+    line: i + 1,
+    message: 'Empty catch block.',
+  }))
+  const md = renderSummary(sampleResult(checksResult({ findings, changedCount: 40, examinedCount: 40 })))
+  assert.match(md, new RegExp(`…and 5 more findings \\(only the first ${MAX_FINDING_ROWS} are listed\\)`))
+})
+
+test('R1: un-compared and un-examined files are disclosed in the section', () => {
+  const md = renderSummary(sampleResult(checksResult({ notCompared: 1, notExamined: 2 })))
+  assert.match(md, /1 changed file could not be compared with the base version; its findings are not shown/)
+  assert.match(md, /2 changed files could not be examined \(too large, or not valid JavaScript\) and were not checked/)
+})
+
+test('R1: a full findings section still renders within the comment budget', () => {
+  const result = hostileResult({ scriptCount: 50, warningCount: 25 })
+  const deep = `${Array.from({ length: 40 }, (_, d) => `segment${d}`).join('/')}/file.js`
+  result.checks = {
+    skipped: null,
+    findings: Array.from({ length: MAX_FINDING_ROWS }, (_, i) => ({
+      check: 'hardcoded-credential',
+      file: `${deep}${i}`,
+      line: 100 + i,
+      message: 'A credential is written directly in the source code — move it to a script parameter or protected storage, and rotate it.',
+    })),
+    changedCount: 30,
+    examinedCount: 30,
+    notCompared: 0,
+    notExamined: 0,
+  }
+  const md = renderSummary(result)
+  assert.ok(md.length <= MAX_COMMENT_CHARS, `summary is ${md.length} chars, budget is ${MAX_COMMENT_CHARS}`)
+  assert.ok(md.trimEnd().endsWith(PUBLISHER_LINE))
+})
