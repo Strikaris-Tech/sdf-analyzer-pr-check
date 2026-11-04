@@ -19,8 +19,11 @@ const { parseStringPromise } = require('xml2js')
 const {
   extractApiVersion,
   extractScriptTypeTag,
-  extractLooseDependencies,
-  findSuiteScriptFiles,
+  extractLooseDependenciesDetailed,
+  collectArrayBindings,
+  resolveCallModules,
+  scanSuiteScriptTree,
+  isSkippedSymlink,
 } = require('./suitescript')
 
 const SUITESCRIPT_TYPES = new Set([
@@ -100,8 +103,9 @@ async function analyze(projectRoot) {
   if (manifestPresent || suiteRoot) {
     warnings.push(...manifestWarnings)
     const scripts = []
+    const skippedSymlinks = []
     if (suiteRoot) {
-      await walkJs(suiteRoot, projectRoot, scripts, warnings)
+      await walkJs(suiteRoot, projectRoot, scripts, warnings, skippedSymlinks)
     } else {
       warnings.push({
         file: path.join(projectRoot, 'src', 'FileCabinet', 'SuiteScripts'),
@@ -109,23 +113,26 @@ async function analyze(projectRoot) {
       })
     }
     const outsideSuiteScripts = await scanOutsideSuiteScripts(projectRoot)
-    return buildResult({ mode: 'project', project: manifest, scripts, warnings, outsideSuiteScripts })
+    return buildResult({ mode: 'project', project: manifest, scripts, warnings, outsideSuiteScripts, skippedSymlinks })
   }
 
-  const looseFiles = await findSuiteScriptFiles(projectRoot)
+  const { files: looseFiles, skippedSymlinks } = await scanSuiteScriptTree(projectRoot)
   if (looseFiles.length === 0) {
-    warnings.push(...manifestWarnings, {
-      file: path.join(projectRoot, 'src', 'FileCabinet', 'SuiteScripts'),
-      message: 'No SuiteScripts directory found — skipping script scan.',
-    })
-    return buildResult({ mode: 'empty', project: manifest, scripts: [], warnings, outsideSuiteScripts: [] })
+    // Empty mode is a statement — "nothing was found here" — not an
+    // issue: the manifest and directory warnings describe a project
+    // that was never claimed to exist, so they are not attached, and an
+    // empty repository reports has-issues=false even under the
+    // fail-on-issues gate (adversarial pass D9). Warnings stay attached
+    // to projects that exist but are broken, above and in loose mode's
+    // sanity-free inventory alike.
+    return buildResult({ mode: 'empty', project: manifest, scripts: [], warnings: [], outsideSuiteScripts: [], skippedSymlinks })
   }
 
   const scripts = looseFiles.map((found) => parseLooseScript(found))
-  return buildResult({ mode: 'loose', project: manifest, scripts, warnings, outsideSuiteScripts: [] })
+  return buildResult({ mode: 'loose', project: manifest, scripts, warnings, outsideSuiteScripts: [], skippedSymlinks })
 }
 
-function buildResult({ mode, project, scripts, warnings, outsideSuiteScripts }) {
+function buildResult({ mode, project, scripts, warnings, outsideSuiteScripts, skippedSymlinks = [] }) {
   const moduleUsage = new Map()
   const byType = new Map()
 
@@ -144,6 +151,7 @@ function buildResult({ mode, project, scripts, warnings, outsideSuiteScripts }) 
     byType: sortDesc(byType),
     warnings,
     outsideSuiteScripts,
+    skippedSymlinks,
     stats: {
       scriptCount: scripts.length,
       dependencyCount: moduleUsage.size,
@@ -157,8 +165,8 @@ function buildResult({ mode, project, scripts, warnings, outsideSuiteScripts }) 
 // folders: project mode sees them but does not scan them, and the summary
 // notes them so a stray script never passes silently.
 async function scanOutsideSuiteScripts(projectRoot) {
-  const found = await findSuiteScriptFiles(projectRoot)
-  return found
+  const { files } = await scanSuiteScriptTree(projectRoot)
+  return files
     .filter(({ relFile }) => !SUITESCRIPTS_ROOTS.some(
       (root) => relFile === root || relFile.startsWith(`${root}/`),
     ))
@@ -174,10 +182,13 @@ function parseLooseScript({ relFile, source }) {
   const tagType = extractScriptTypeTag(source)
   let type = SUITESCRIPT_TYPES.has(tagType) ? tagType : null
   let dependencies = []
+  let dependenciesIncomplete = false
   let exports = []
   const ast = tryParse(source)
   if (ast) {
-    dependencies = extractLooseDependencies(ast)
+    const detailed = extractLooseDependenciesDetailed(ast)
+    dependencies = detailed.dependencies
+    dependenciesIncomplete = detailed.incomplete
     exports = extractExports(ast)
     type = guessScriptType(source, exports) || type
   }
@@ -186,6 +197,7 @@ function parseLooseScript({ relFile, source }) {
     type,
     apiVersion: extractApiVersion(source),
     dependencies,
+    dependenciesIncomplete,
     exports,
     lineCount: source.split('\n').length,
   }
@@ -207,9 +219,15 @@ function tryParse(source) {
 }
 
 // Reads the manifest and reports whether one is present at all — present
-// but unparseable still counts, because mode selection keys off the layout
-// existing, not off it being valid. Warnings match readManifest's history:
-// a parse failure and a missing manifest are both reported.
+// but unusable still counts, because mode selection keys off the layout
+// existing, not off it being valid. Each candidate is tried in order and
+// a candidate only succeeds when it parses AND its root element is
+// `manifest`: a broken or wrong-shaped file earns its own warning and
+// the probe falls through to the other location, so a valid root
+// manifest is never shadowed by a broken src/ copy, and one real problem
+// never reports as two contradictory warnings (adversarial pass D5, D13).
+// The "not found" warning is reserved for the case where no candidate
+// file exists at all.
 async function probeManifest(projectRoot, warnings) {
   // SDF projects may place manifest.xml at project root OR under src/.
   const candidates = [
@@ -218,32 +236,50 @@ async function probeManifest(projectRoot, warnings) {
   ]
   let present = false
   for (const file of candidates) {
+    let raw
     try {
-      const raw = await fs.readFile(file, 'utf8')
-      present = true
-      const xml = await parseStringPromise(raw, { explicitArray: false, mergeAttrs: true })
-      const m = xml.manifest || {}
-      return {
-        present,
-        manifest: {
-          name: (m.projectname || m.name || '').toString().trim() || null,
-          type: (m.projecttype || m.type || '').toString().trim() || null,
-          frameworkVersion: (m.frameworkversion || '').toString().trim() || null,
-          manifestPath: path.relative(projectRoot, file),
-        },
-      }
+      raw = await fs.readFile(file, 'utf8')
     } catch (err) {
-      if (err.code !== 'ENOENT') {
-        present = true
-        warnings.push({ file, message: `manifest.xml parse failed: ${err.message}` })
-        break
-      }
+      if (err.code === 'ENOENT') continue
+      present = true
+      warnings.push({ file, message: `manifest.xml could not be read: ${err.message}` })
+      continue
+    }
+    present = true
+    let xml
+    try {
+      xml = await parseStringPromise(raw, { explicitArray: false, mergeAttrs: true })
+    } catch (err) {
+      warnings.push({ file, message: `manifest.xml parse failed: ${err.message}` })
+      continue
+    }
+    if (!xml || typeof xml !== 'object' || !('manifest' in xml)) {
+      const actualRoot = xml && typeof xml === 'object' ? Object.keys(xml)[0] : null
+      warnings.push({
+        file,
+        message:
+          'manifest.xml does not look like an SDF manifest — its root element is ' +
+          `<${actualRoot || 'unknown'}>, not <manifest>.`,
+      })
+      continue
+    }
+    const m = xml.manifest || {}
+    return {
+      present,
+      manifest: {
+        name: (m.projectname || m.name || '').toString().trim() || null,
+        type: (m.projecttype || m.type || '').toString().trim() || null,
+        frameworkVersion: (m.frameworkversion || '').toString().trim() || null,
+        manifestPath: path.relative(projectRoot, file),
+      },
     }
   }
-  warnings.push({
-    file: path.join(projectRoot, 'src', 'manifest.xml'),
-    message: 'No manifest.xml found — project may not be a valid SDF project.',
-  })
+  if (!present) {
+    warnings.push({
+      file: path.join(projectRoot, 'src', 'manifest.xml'),
+      message: 'No manifest.xml found — project may not be a valid SDF project.',
+    })
+  }
   return {
     present,
     manifest: { name: null, type: null, frameworkVersion: null, manifestPath: null },
@@ -269,7 +305,7 @@ async function scanScripts(projectRoot, warnings) {
   const scripts = []
   const root = await findSuiteScriptsRoot(projectRoot)
   if (root) {
-    await walkJs(root, projectRoot, scripts, warnings)
+    await walkJs(root, projectRoot, scripts, warnings, [])
     return scripts
   }
   warnings.push({
@@ -279,12 +315,18 @@ async function scanScripts(projectRoot, warnings) {
   return scripts
 }
 
-async function walkJs(dir, projectRoot, out, warnings) {
+async function walkJs(dir, projectRoot, out, warnings, skippedSymlinks) {
   const entries = await fs.readdir(dir, { withFileTypes: true })
   for (const e of entries) {
     const full = path.join(dir, e.name)
-    if (e.isDirectory()) {
-      await walkJs(full, projectRoot, out, warnings)
+    if (e.isSymbolicLink()) {
+      // Never followed (cycle-safe by construction) but no longer
+      // invisible: the skipped entry is named for the summary (D8).
+      if (await isSkippedSymlink(full, e.name)) {
+        skippedSymlinks.push(path.relative(projectRoot, full).split(path.sep).join('/'))
+      }
+    } else if (e.isDirectory()) {
+      await walkJs(full, projectRoot, out, warnings, skippedSymlinks)
     } else if (e.isFile() && e.name.endsWith('.js')) {
       const script = await parseScript(full, projectRoot, warnings)
       if (script) out.push(script)
@@ -302,6 +344,14 @@ async function parseScript(file, projectRoot, warnings) {
     return null
   }
 
+  if (source.trim() === '') {
+    // An empty or whitespace-only file declares nothing. Counting it as
+    // a script inflates the inventory with a phantom "Unknown" entry
+    // (adversarial pass D6); it is skipped, silently, like loose mode
+    // already skips content-free files.
+    return null
+  }
+
   let ast
   try {
     ast = acorn.parse(source, PARSE_OPTIONS)
@@ -310,7 +360,7 @@ async function parseScript(file, projectRoot, warnings) {
     return null
   }
 
-  const dependencies = extractDependencies(ast)
+  const detailed = extractDependenciesDetailed(ast)
   const exports = extractExports(ast)
   const apiVersion = extractApiVersion(source)
   const type = guessScriptType(source, exports)
@@ -319,32 +369,42 @@ async function parseScript(file, projectRoot, warnings) {
     file: relFile,
     type,
     apiVersion,
-    dependencies,
+    dependencies: detailed.dependencies,
+    dependenciesIncomplete: detailed.incomplete,
     exports,
     lineCount: source.split('\n').length,
   }
 }
 
 // Extract N/ modules from `define(["N/record", "N/search"], function(...) {...})`.
-// Only matches the top-level define() call that SuiteScript 2.x uses.
+// Only matches the define() call that SuiteScript 2.x uses.
 function extractDependencies(ast) {
+  return extractDependenciesDetailed(ast).dependencies
+}
+
+// extractDependencies, with the completeness signal. The dependency list
+// may be an array literal, an in-file variable bound to one, or a spread
+// of either — suitescript.js's static reader resolves all of those, and
+// anything it cannot read marks the declaration incomplete (adversarial
+// pass D10) instead of silently undercounting.
+function extractDependenciesDetailed(ast) {
+  const bindings = collectArrayBindings(ast)
   const deps = new Set()
+  let incomplete = false
   walk.simple(ast, {
     CallExpression(node) {
       if (node.callee.type === 'Identifier' && node.callee.name === 'define') {
-        const arrArg = node.arguments.find((a) => a && a.type === 'ArrayExpression')
-        if (!arrArg) return
-        for (const el of arrArg.elements) {
-          if (el && el.type === 'Literal' && typeof el.value === 'string') {
-            if (el.value.startsWith('N/') || el.value.startsWith('SuiteScripts/')) {
-              deps.add(el.value)
-            }
+        const part = resolveCallModules(node, bindings)
+        for (const name of part.names) {
+          if (name.startsWith('N/') || name.startsWith('SuiteScripts/')) {
+            deps.add(name)
           }
         }
+        incomplete = incomplete || part.incomplete
       }
     },
   })
-  return Array.from(deps).sort()
+  return { dependencies: Array.from(deps).sort(), incomplete }
 }
 
 // Extract exports from `return { onRequest: ..., beforeSubmit: ... }`
@@ -403,6 +463,6 @@ module.exports = {
   // exported for tests:
   assertUsableProjectRoot,
   readManifest, scanScripts, parseScript, parseLooseScript,
-  extractDependencies, extractExports, guessScriptType,
+  extractDependencies, extractDependenciesDetailed, extractExports, guessScriptType,
   extractApiVersion,
 }
