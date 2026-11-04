@@ -3,6 +3,12 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v1.1.1). The tag must already exist.'
+        required: true
+        type: string
 
 jobs:
   release:
@@ -12,6 +18,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -30,7 +38,18 @@ jobs:
       - name: Determine version
         id: v
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+          fi
+          case "$TAG" in
+            v[0-9]*) ;;
+            *)
+              echo "::error::Could not determine a release tag (event: ${{ github.event_name }}, resolved: '${TAG}'). Dispatch with a tag input such as v1.1.1, or push a v* tag."
+              exit 1
+              ;;
+          esac
           MAJOR=$(echo "$TAG" | sed -E 's/^v([0-9]+).*/v\1/')
           echo "tag=$TAG"   >> $GITHUB_OUTPUT
           echo "major=$MAJOR" >> $GITHUB_OUTPUT
