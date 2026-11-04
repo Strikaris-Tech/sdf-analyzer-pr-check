@@ -42,6 +42,34 @@ const TRUNCATION_NOTE =
   '_The full results are larger than a pull-request comment can carry — ' +
   'the listings above are truncated; the counts in this summary are exact._'
 
+// Footnote for the † marker in the inventory: a dependency declaration
+// the static reader could not fully resolve (a dynamic define/require
+// form) makes that file's dependency count a lower bound — the count is
+// shown with its limit stated, never silently understated (D10).
+const DEPS_INCOMPLETE_NOTE =
+  '_† Dependency declaration could not be fully read for the marked ' +
+  'file(s) — their dependency counts are a lower bound._'
+
+// Manifest fields are project-authored text interpolated into a comment
+// posted under the github-actions identity: newlines and markdown
+// control characters are stripped and the value is length-capped before
+// rendering, so a manifest cannot break the comment's layout or plant
+// arbitrary markdown in it (adversarial pass D12).
+const MAX_MANIFEST_FIELD_CHARS = 100
+const MARKDOWN_CONTROL_CHARS = /[*_`[\]()<>|#]/g
+
+function sanitizeManifestField(value) {
+  if (!value) return value
+  const cleaned = String(value)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(MARKDOWN_CONTROL_CHARS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned.length > MAX_MANIFEST_FIELD_CHARS
+    ? `${cleaned.slice(0, MAX_MANIFEST_FIELD_CHARS)}…`
+    : cleaned
+}
+
 function renderSummary(result, { projectRoot } = {}) {
   for (let stage = 0; stage < LIST_LIMIT_STAGES.length; stage++) {
     const body = renderWithinLimits(result, projectRoot, LIST_LIMIT_STAGES[stage], stage > 0)
@@ -58,6 +86,7 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
   const { project, scripts, moduleUsage, byType, warnings, stats } = result
   const mode = result.mode || 'project'
   const outsideSuiteScripts = result.outsideSuiteScripts || []
+  const skippedSymlinks = result.skippedSymlinks || []
   const lines = []
 
   lines.push(COMMENT_MARKER)
@@ -77,7 +106,8 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
     lines.push('')
   }
   if (project && project.name) {
-    lines.push(`**Project:** ${project.name}${project.type ? ` (${project.type})` : ''}`)
+    const type = project.type ? ` (${sanitizeManifestField(project.type)})` : ''
+    lines.push(`**Project:** ${sanitizeManifestField(project.name)}${type}`)
     lines.push('')
   }
   if (mode === 'loose') {
@@ -95,6 +125,10 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
   lines.push('')
   if (outsideSuiteScripts.length > 0) {
     lines.push(outsideNote(outsideSuiteScripts))
+    lines.push('')
+  }
+  if (skippedSymlinks.length > 0) {
+    lines.push(skippedSymlinksNote(skippedSymlinks))
     lines.push('')
   }
 
@@ -117,11 +151,16 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
     lines.push('| File | Type | API | Dependencies |')
     lines.push('| --- | --- | --- | ---: |')
     for (const s of scripts.slice(0, limits.scripts)) {
-      lines.push(`| \`${s.file}\` | ${s.type || 'Unknown'} | ${s.apiVersion || '—'} | ${s.dependencies.length} |`)
+      const depCount = `${s.dependencies.length}${s.dependenciesIncomplete ? ' †' : ''}`
+      lines.push(`| \`${s.file}\` | ${s.type || 'Unknown'} | ${s.apiVersion || '—'} | ${depCount} |`)
     }
     if (scripts.length > limits.scripts) {
       lines.push('')
       lines.push(`_…and ${scripts.length - limits.scripts} more scripts (only the first ${limits.scripts} are listed)._`)
+    }
+    if (scripts.some((s) => s.dependenciesIncomplete)) {
+      lines.push('')
+      lines.push(DEPS_INCOMPLETE_NOTE)
     }
   }
   lines.push('')
@@ -181,6 +220,22 @@ function truncateToBudget(body) {
   let cut = body.lastIndexOf('\n', keep)
   if (cut <= 0) cut = keep
   return `${body.slice(0, cut)}\n${noteLine}${tail}`
+}
+
+// One line naming the symlinked entries the scan skipped: links are
+// never followed (cycle-safe), but the skip is reported rather than
+// silent, so a repository routing code through links is not understated
+// without a trace (adversarial pass D8).
+function skippedSymlinksNote(files) {
+  const named = files.slice(0, MAX_OUTSIDE_NAMED).map((f) => `\`${f}\``).join(', ')
+  const more = files.length > MAX_OUTSIDE_NAMED
+    ? `, and ${files.length - MAX_OUTSIDE_NAMED} more`
+    : ''
+  const noun = files.length === 1 ? 'entry was' : 'entries were'
+  return (
+    `_Note: ${files.length} symlinked ${noun} skipped — ` +
+    `the scan does not follow symlinks: ${named}${more}._`
+  )
 }
 
 // One line in the project-mode comment for annotated SuiteScript files that
@@ -252,14 +307,28 @@ function isSizeRejection(err) {
   return /too long|65536/i.test(err.message || '')
 }
 
+// One page of the sticky-comment lookup. A busy pull request can carry
+// far more comments than one page holds; the lookup walks pages until
+// it finds the marked comment or a short page ends the list, so sticky
+// mode updates its own comment instead of posting a duplicate
+// (adversarial pass D4).
+const COMMENTS_PAGE_SIZE = 100
+
 async function findOwnComment(issues, { owner, repo, issueNumber }) {
-  const { data } = await issues.listComments({
-    owner,
-    repo,
-    issue_number: issueNumber,
-    per_page: 100,
-  })
-  return data.find((c) => typeof c.body === 'string' && c.body.includes(COMMENT_MARKER)) || null
+  for (let page = 1; ; page++) {
+    const { data } = await issues.listComments({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      per_page: COMMENTS_PAGE_SIZE,
+      page,
+    })
+    const found = data.find(
+      (c) => typeof c.body === 'string' && c.body.includes(COMMENT_MARKER),
+    )
+    if (found) return found
+    if (data.length < COMMENTS_PAGE_SIZE) return null
+  }
 }
 
 module.exports = {
