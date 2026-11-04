@@ -56,6 +56,34 @@ const SUITESCRIPTS_ROOTS = [
   'FileCabinet/SuiteScripts',
 ]
 
+// The one input every consumer sets is project-path; a typo there used to
+// produce a green run claiming the repository was empty (adversarial
+// pass D3). Verify the resolved root exists and is a directory before
+// any analysis runs, and fail with a message naming the path. An
+// existing directory that simply holds no project stays valid — the
+// honest-empty result is a designed behavior, not an error.
+async function assertUsableProjectRoot(projectRoot, displayPath) {
+  const shown = displayPath || projectRoot
+  let stat = null
+  try {
+    stat = await fs.stat(projectRoot)
+  } catch {
+    stat = null
+  }
+  if (!stat) {
+    throw new Error(
+      `project-path "${shown}" does not exist (resolved to ${projectRoot}). ` +
+      'Check the project-path input and try again.',
+    )
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(
+      `project-path "${shown}" is not a directory (resolved to ${projectRoot}). ` +
+      'Point project-path at the project root directory.',
+    )
+  }
+}
+
 // Mode selection: an SDF project layout (a manifest, or a SuiteScripts
 // folder) means project mode, exactly as this analyzer has always behaved.
 // Without one, fall back to loose-file mode — an inventory of the annotated
@@ -373,6 +401,7 @@ function sortDesc(map) {
 module.exports = {
   analyze,
   // exported for tests:
+  assertUsableProjectRoot,
   readManifest, scanScripts, parseScript, parseLooseScript,
   extractDependencies, extractExports, guessScriptType,
   extractApiVersion,
