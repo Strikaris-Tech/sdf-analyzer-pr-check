@@ -13,12 +13,23 @@ It runs entirely on the GitHub runner inside your own repository. Your code neve
 Add a workflow to your repository (for example `.github/workflows/sdf-analysis.yml`):
 
 ```yaml
-- uses: Strikaris-Tech/sdf-analyzer-pr-check@v1
-  with:
-    project-path: '.'
+name: SDF Analyzer — PR Check
+on: pull_request
+permissions:
+  pull-requests: write
+jobs:
+  pr-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Strikaris-Tech/sdf-analyzer-pr-check@v1
+        with:
+          project-path: '.'
 ```
 
-That is all the setup there is. On the next pull request, the analysis appears as a comment.
+That workflow file is the whole setup, saved under `.github/workflows/` in your repository. On the next pull request, the analysis appears as a comment.
 
 ## What it does
 
