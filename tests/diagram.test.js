@@ -17,6 +17,8 @@ const {
 const {
   MAX_COMMENT_CHARS,
   DIAGRAM_SCOPE_NOTE,
+  DIAGRAM_KEY,
+  DIAGRAM_KEY_SEMANTICS,
   renderSummary,
   renderDiagramSection,
   sanitizeDiagramLabel,
@@ -47,7 +49,7 @@ const SRC_BASIC = HEADER + `define(['N/record'], function (record) {
 });
 `
 
-test('diagram: entry point, helper chain, source order, duplicates collapsed', () => {
+test('diagram: entry point, helper chain, call order, duplicates collapsed', () => {
   const d = extractCallDiagram(SRC_BASIC)
   assert.ok(d)
   assert.deepEqual(d.participants, ['beforeSubmit', 'loadRecord', 'validate', 'helper'])
@@ -91,9 +93,13 @@ test('diagram: variable-bound and arrow functions are definitions', () => {
 });
 `
   const d = extractCallDiagram(src)
+  // Call order from the entry point (F-A1): onRequest's call comes
+  // first, then the call it reaches — not file-offset order, which
+  // put compute's internal call first because compute is defined
+  // before onRequest.
   assert.deepEqual(d.calls, [
-    { from: 'compute', to: 'format' },
     { from: 'onRequest', to: 'compute' },
+    { from: 'compute', to: 'format' },
   ])
   assert.deepEqual(d.entryPoints, ['onRequest'])
 })
@@ -121,9 +127,12 @@ test('diagram: nested functions are participants; anonymous callbacks attribute 
 });
 `
   const d = extractCallDiagram(src)
+  // Call order from the entry point (F-A1): outer's call to inner
+  // first, then inner's own call — the callback-folded call inside
+  // inner is still attributed to inner.
   assert.deepEqual(d.calls, [
-    { from: 'inner', to: 'leaf' },
     { from: 'outer', to: 'inner' },
+    { from: 'inner', to: 'leaf' },
   ])
   assert.deepEqual(d.entryPoints, ['outer'])
 })
@@ -317,10 +326,16 @@ test('render: a diagram section renders a fenced Mermaid block with generated id
   assert.equal((text.match(/```/g) || []).length, 2)
 })
 
-test('render: no diagrams, no calls, or a null list renders no section', () => {
+test('render: a null or empty list renders no section; a zero-call record renders the accounting line', () => {
   assert.deepEqual(renderDiagramSection(null), [])
   assert.deepEqual(renderDiagramSection([]), [])
-  assert.deepEqual(renderDiagramSection([sampleDiagram({ calls: [] })]), [])
+  // A file that was examined and made no direct intra-file calls is
+  // accounted for in the section (F-C1), not silently absent.
+  const text = renderDiagramSection([sampleDiagram({ calls: [], participants: [], entryPoints: [] })]).join('\n')
+  assert.match(text, /### Call diagrams for changed files/)
+  assert.match(text, /No diagram for 1 changed file: it makes no direct calls between functions within the file\./)
+  assert.ok(!text.includes('```mermaid'))
+  assert.ok(text.includes(DIAGRAM_SCOPE_NOTE))
 })
 
 test('render: an over-cap file is omitted by name, not drawn partially', () => {
@@ -569,7 +584,7 @@ test('integration: an examined file with direct calls contributes its diagram', 
   ])
 })
 
-test('integration: a file with no direct calls contributes no diagram', async () => {
+test('integration: a file with no direct calls contributes an empty diagram record', async () => {
   const repoPath = 'src/FileCabinet/SuiteScripts/b.js'
   const src = HEADER + `define([], function () {
   function onRequest() { return 1; }
@@ -583,7 +598,12 @@ test('integration: a file with no direct calls contributes no diagram', async ()
     readBaseFile: async () => { throw new Error('must not be called') },
   })
   assert.equal(result.examinedCount, 1)
-  assert.deepEqual(result.diagrams, [])
+  // The record is present (F-C1) so the renderer can account for the
+  // file; it carries no calls and is not over the caps.
+  assert.equal(result.diagrams.length, 1)
+  assert.equal(result.diagrams[0].file, repoPath)
+  assert.deepEqual(result.diagrams[0].calls, [])
+  assert.equal(result.diagrams[0].overCap, false)
 })
 
 test('integration: an unparseable file is not examined and contributes no diagram', async () => {
@@ -596,4 +616,482 @@ test('integration: an unparseable file is not examined and contributes no diagra
   })
   assert.equal(result.notExamined, 1)
   assert.deepEqual(result.diagrams, [])
+})
+
+// ---------- v1.2.1: F-A1 root-first message order (FD-V1) ----------
+
+// The diagram audit's trace-order invariant: walking the messages
+// top to bottom, a function may only emit a call once it has been
+// activated — by being an entry point, by an earlier message that
+// calls it, or by opening a component nothing in the file calls.
+// A callee-internal message drawn before the message that invokes
+// its caller (the F-A1 defect) violates it.
+function assertTraceOrder(d, label) {
+  const activated = new Set(d.entryPoints)
+  const hasIncoming = new Set(d.calls.map((c) => c.to))
+  for (const call of d.calls) {
+    if (!activated.has(call.from)) {
+      assert.ok(
+        !hasIncoming.has(call.from),
+        `${label}: ${call.from} emits a call before the call that invokes it`,
+      )
+      activated.add(call.from)
+    }
+    activated.add(call.to)
+  }
+}
+
+// The Phase 3 plant file (cleanroom-install-test PR #3), the one
+// real-world artefact: the entry point is defined AFTER its helpers,
+// the layout that made v1.2.0 draw an impossible first message.
+const SRC_PHASE3 = `/**
+ * @NApiVersion 2.1
+ * @NScriptType UserEventScript
+ */
+define(['N/record', 'N/log'], (record, log) => {
+    'use strict';
+
+    const formatEntityName = (entityId) => {
+        return (entityId || 'new customer').trim();
+    };
+
+    const buildWelcomeComment = (customer) => {
+        const entityId = customer.getValue({ fieldId: 'entityid' });
+        const name = formatEntityName(entityId);
+        return 'Welcome aboard, ' + name;
+    };
+
+    const logWelcome = (customer) => {
+        try {
+            log.debug({ title: 'Welcome', details: 'Customer ' + customer.id + ' welcomed' });
+        } catch (logError) {
+        }
+    };
+
+    const beforeSubmit = (context) => {
+        if (context.type !== context.UserEventType.CREATE) {
+            return;
+        }
+        const customer = context.newRecord;
+        const comment = buildWelcomeComment(customer);
+        record.submitFields({
+            type: record.Type.CUSTOMER,
+            id: customer.id,
+            values: { comments: comment }
+        });
+        logWelcome(customer);
+    };
+
+    return { beforeSubmit };
+});
+`
+
+test('F-A1: the Phase 3 artefact opens with the entry point call, in call order', () => {
+  const d = extractCallDiagram(SRC_PHASE3)
+  assert.ok(d)
+  // v1.2.0 drew buildWelcomeComment -> formatEntityName first — an
+  // event that cannot happen first. The entry point's own call now
+  // opens the diagram, and each callee's calls follow the call that
+  // reaches it.
+  assert.deepEqual(d.calls, [
+    { from: 'beforeSubmit', to: 'buildWelcomeComment' },
+    { from: 'buildWelcomeComment', to: 'formatEntityName' },
+    { from: 'beforeSubmit', to: 'logWelcome' },
+  ])
+  assert.equal(d.calls[0].from, 'beforeSubmit')
+  // F-F3: the entry point is the first participant, not the last.
+  assert.deepEqual(d.participants, [
+    'beforeSubmit', 'buildWelcomeComment', 'formatEntityName', 'logWelcome',
+  ])
+  assert.deepEqual(d.entryPoints, ['beforeSubmit'])
+  assertTraceOrder(d, 'phase3')
+  const text = renderDiagramSection([{ file: 'ue_customer_welcome.js', ...d }]).join('\n')
+  assert.match(text, /participant P1 as beforeSubmit/)
+  assert.match(text, /P1->>P2: buildWelcomeComment/)
+})
+
+test('F-A1: a conditional branch call expands before the callers next call', () => {
+  // The audit's second ordering artefact: beforeSubmit conditionally
+  // calls rarePath (which calls logIt), then unconditionally calls
+  // alwaysPath. logIt happens inside rarePath, so it is drawn second
+  // — v1.2.0 drew it third, after alwaysPath, because rarePath is
+  // defined before beforeSubmit in the file.
+  const src = HEADER + `define([], function () {
+  function logIt() { return 1; }
+  function rarePath() { logIt(); }
+  function alwaysPath() { return 2; }
+  function beforeSubmit(ctx) { if (ctx.rare) rarePath(); alwaysPath(); }
+  return { beforeSubmit: beforeSubmit };
+});
+`
+  const d = extractCallDiagram(src)
+  assert.deepEqual(d.calls, [
+    { from: 'beforeSubmit', to: 'rarePath' },
+    { from: 'rarePath', to: 'logIt' },
+    { from: 'beforeSubmit', to: 'alwaysPath' },
+  ])
+  assertTraceOrder(d, 'branch')
+})
+
+test('F-A1: the trace-order invariant holds across the fixture shapes', () => {
+  assertTraceOrder(extractCallDiagram(SRC_BASIC), 'basic')
+  const cycle = HEADER + `define([], function () {
+  function a() { b(); }
+  function b() { a(); }
+  return { execute: a };
+});
+`
+  assertTraceOrder(extractCallDiagram(cycle), 'cycle')
+  const unreachable = HEADER + `define([], function () {
+  class Runner {
+    start() { this.step(); }
+    step() { finish(); }
+  }
+  function finish() { return 1; }
+  function onRequest() { return 1; }
+  return { onRequest: onRequest };
+});
+`
+  assertTraceOrder(extractCallDiagram(unreachable), 'unreachable')
+})
+
+test('F-A1: a deep chain defined in reverse still orders as the chain', () => {
+  const N = 500
+  const lines = []
+  for (let i = N - 1; i >= 1; i--) {
+    lines.push(`  function c${i}() { ${i < N - 1 ? `c${i + 1}();` : 'return 0;'} }`)
+  }
+  lines.push('  function start() { c1(); }')
+  const src = HEADER + `define([], function () {\n${lines.join('\n')}\n  return { execute: start };\n});\n`
+  const d = extractCallDiagram(src)
+  assert.equal(d.calls.length, N - 1)
+  assert.deepEqual(d.calls[0], { from: 'start', to: 'c1' })
+  assert.deepEqual(d.calls[N - 2], { from: `c${N - 2}`, to: `c${N - 1}` })
+  for (let i = 0; i + 1 < d.calls.length; i++) {
+    assert.equal(d.calls[i].to, d.calls[i + 1].from)
+  }
+  assertTraceOrder(d, 'chain')
+})
+
+test('F-A1 adversarial: a very deep chain terminates (iterative traversal)', () => {
+  const N = 3000
+  const lines = []
+  for (let i = N - 1; i >= 1; i--) {
+    lines.push(`  function c${i}() { ${i < N - 1 ? `c${i + 1}();` : 'return 0;'} }`)
+  }
+  lines.push('  function start() { c1(); }')
+  const src = HEADER + `define([], function () {\n${lines.join('\n')}\n  return { execute: start };\n});\n`
+  const d = extractCallDiagram(src)
+  assert.equal(d.calls.length, N - 1)
+  assert.equal(d.calls[N - 2].to, `c${N - 1}`)
+})
+
+// ---------- v1.2.1: the key and the scope note (F-F1 / F-A2 / F-F4, FD-V2) ----------
+
+test('render: the key prints once under the heading when a diagram is drawn', () => {
+  const two = renderDiagramSection([sampleDiagram(), sampleDiagram({ file: 'b.js' })]).join('\n')
+  assert.equal(two.split(DIAGRAM_KEY).length - 1, 1)
+  assert.equal(two.split(DIAGRAM_KEY_SEMANTICS).length - 1, 1)
+  assert.ok(two.indexOf(DIAGRAM_KEY) > two.indexOf('### Call diagrams for changed files'))
+  assert.ok(two.indexOf(DIAGRAM_KEY) < two.indexOf('```mermaid'))
+  const reduced = renderDiagramSection([sampleDiagram(), sampleDiagram({ file: 'b.js' })], 'reduced').join('\n')
+  assert.ok(reduced.includes(DIAGRAM_KEY))
+  assert.ok(reduced.includes(DIAGRAM_SCOPE_NOTE))
+})
+
+test('render: omitted mode keeps the scope note and prints no key', () => {
+  const text = renderDiagramSection([sampleDiagram()], 'omitted').join('\n')
+  assert.match(text, /Call diagrams are omitted from this comment/)
+  assert.ok(text.includes(DIAGRAM_SCOPE_NOTE))
+  assert.ok(!text.includes(DIAGRAM_KEY))
+})
+
+test('render: the key disclosures are present and the scope note no longer contradicts them', () => {
+  // The key decodes the drawing (F-F1) ...
+  assert.match(DIAGRAM_KEY, /each box is a function defined in this file/)
+  assert.match(DIAGRAM_KEY, /an arrow is a direct call/)
+  assert.match(DIAGRAM_KEY, /marks an entry point/)
+  // ... and discloses the flattened semantics (F-A2) and the
+  // no-returns simplification (F-F4).
+  assert.match(DIAGRAM_KEY_SEMANTICS, /in call order from each entry point/)
+  assert.match(DIAGRAM_KEY_SEMANTICS, /however many times the call appears in the code/)
+  assert.match(DIAGRAM_KEY_SEMANTICS, /inside a condition or a loop is drawn the same/)
+  assert.match(DIAGRAM_KEY_SEMANTICS, /inside a callback is drawn as a call of the function that contains the callback/)
+  assert.match(DIAGRAM_KEY_SEMANTICS, /shown without returns/)
+  // The scope note must not claim callback calls are not shown:
+  // they are shown, folded onto the containing function (F-A2).
+  assert.ok(!DIAGRAM_SCOPE_NOTE.includes('callback'))
+  assert.match(DIAGRAM_SCOPE_NOTE, /through variables, are not shown/)
+})
+
+// ---------- v1.2.1: omission accounting (F-A3 / F-C1, FD-V3) ----------
+
+const SRC_AMBIGUOUS = HEADER + `define([], function () {
+  function init() { return 1; }
+  function init() { return 2; }
+  function helperA() { init(); return 1; }
+  function helperB() { return 2; }
+  function main() { init(); helperA(); helperB(); }
+  return { execute: main };
+});
+`
+
+test('F-A3: ambiguity-omitted calls are printed for the file, with the extractor count', () => {
+  const d = extractCallDiagram(SRC_AMBIGUOUS)
+  assert.ok(d)
+  assert.equal(d.ambiguousCalls, 2)
+  assert.deepEqual(d.calls, [
+    { from: 'main', to: 'helperA' },
+    { from: 'main', to: 'helperB' },
+  ])
+  const text = renderDiagramSection([{ file: 'amb.js', ...d }]).join('\n')
+  assert.ok(text.includes('```mermaid'))
+  const line = text.split('\n').find((l) => l.includes('are not shown'))
+  assert.ok(line, 'ambiguity line present')
+  assert.ok(line.includes('`amb.js`'))
+  // FD-V3: the printed count equals the extractor's count.
+  assert.equal(Number(line.match(/(\d+) direct calls? are not shown/)[1]), d.ambiguousCalls)
+  assert.match(line, /a function name is defined more than once in this file/)
+})
+
+test('F-A3 adversarial: a hostile file path reaches the ambiguity line only sanitised', () => {
+  const d = {
+    file: 'src/FileCabinet/SuiteScripts/we`ird\nname.js',
+    participants: [], entryPoints: [], calls: [], ambiguousCalls: 1, overCap: false,
+  }
+  const text = renderDiagramSection([d]).join('\n')
+  assert.ok(!text.includes('we`ird'))
+  assert.match(text, /`src\/FileCabinet\/SuiteScripts\/weirdname\.js` — 1 direct call is not shown/)
+})
+
+test('F-A1: a diamond expands the first branch before the second is drawn', () => {
+  const src = HEADER + `define([], function () {
+  function leaf() { return 0; }
+  function left() { leaf(); }
+  function right() { leaf(); }
+  function main() { left(); right(); }
+  return { execute: main };
+});
+`
+  const d = extractCallDiagram(src)
+  assert.deepEqual(d.calls, [
+    { from: 'main', to: 'left' },
+    { from: 'left', to: 'leaf' },
+    { from: 'main', to: 'right' },
+    { from: 'right', to: 'leaf' },
+  ])
+  assertTraceOrder(d, 'diamond')
+})
+
+test('F-A3: a file whose calls are all ambiguous states the loss without a block', () => {
+  const src = HEADER + `define([], function () {
+  function main() { leaf(); }
+  function main() { leaf(); }
+  function leaf() { return 1; }
+  return { execute: main };
+});
+`
+  const d = extractCallDiagram(src)
+  assert.equal(d.ambiguousCalls, 2)
+  assert.deepEqual(d.calls, [])
+  const text = renderDiagramSection([{ file: 'dup.js', ...d }]).join('\n')
+  assert.match(text, /2 direct calls are not shown/)
+  assert.ok(!text.includes('```mermaid'))
+})
+
+test('F-C1: the section reconciles — drawn, over-cap, ambiguous and uncalled files all accounted', () => {
+  const records = [
+    sampleDiagram({ file: 'drawn.js' }),
+    sampleDiagram({ file: 'big.js', overCap: true }),
+    { file: 'amb.js', participants: [], entryPoints: [], calls: [], ambiguousCalls: 2, overCap: false },
+    { file: 'plain1.js', participants: ['onRequest'], entryPoints: ['onRequest'], calls: [], ambiguousCalls: 0, overCap: false },
+    { file: 'plain2.js', participants: ['onRequest'], entryPoints: ['onRequest'], calls: [], ambiguousCalls: 0, overCap: false },
+  ]
+  const text = renderDiagramSection(records).join('\n')
+  assert.match(text, /\*\*`drawn\.js`\*\*/)
+  assert.match(text, /`big\.js` — its call diagram is omitted/)
+  assert.match(text, /`amb\.js` — 2 direct calls are not shown/)
+  assert.match(text, /No diagram for 2 other changed files: they make no direct calls between functions within the file\./)
+})
+
+test('F-C1: reduced mode still accounts for the files it does not draw', () => {
+  const records = [
+    sampleDiagram({ file: 'one.js' }),
+    sampleDiagram({ file: 'two.js' }),
+    { file: 'plain.js', participants: ['onRequest'], entryPoints: ['onRequest'], calls: [], ambiguousCalls: 0, overCap: false },
+  ]
+  const text = renderDiagramSection(records, 'reduced').join('\n')
+  assert.equal((text.match(/```mermaid/g) || []).length, 1)
+  assert.match(text, /Call diagrams for 1 more changed file/)
+  assert.match(text, /No diagram for 1 other changed file: it makes no direct calls between functions within the file\./)
+})
+
+test('F-C1: omitted mode with only uncalled files prints no budget note', () => {
+  const records = [
+    { file: 'plain.js', participants: ['onRequest'], entryPoints: ['onRequest'], calls: [], ambiguousCalls: 0, overCap: false },
+  ]
+  const text = renderDiagramSection(records, 'omitted').join('\n')
+  assert.ok(!/not room to print them whole/.test(text))
+  assert.match(text, /No diagram for 1 changed file: it makes no direct calls between functions within the file\./)
+  assert.ok(text.includes(DIAGRAM_SCOPE_NOTE))
+})
+
+test('integration: a two-file pull request reconciles in the rendered section', async () => {
+  const aPath = 'src/FileCabinet/SuiteScripts/a.js'
+  const bPath = 'src/FileCabinet/SuiteScripts/b.js'
+  const moduleOnly = HEADER + `define(['N/record'], function (record) {
+  function beforeSubmit(ctx) {
+    return record.load({ type: 'customer', id: 1 });
+  }
+  return { beforeSubmit: beforeSubmit };
+});
+`
+  const sources = { [aPath]: SRC_BASIC, [bPath]: moduleOnly }
+  const result = await runPatternChecks({
+    ...PROJECT,
+    changesFiles: [
+      projectChange(aPath, { kind: 'added', prevRepoPath: null }),
+      projectChange(bPath, { kind: 'added', prevRepoPath: null }),
+    ],
+    readHeadFile: async (p) => sources[p],
+    readBaseFile: async () => { throw new Error('must not be called') },
+  })
+  assert.equal(result.examinedCount, 2)
+  assert.equal(result.diagrams.length, 2)
+  const text = renderDiagramSection(result.diagrams).join('\n')
+  assert.match(text, /\*\*`src\/FileCabinet\/SuiteScripts\/a\.js`\*\*/)
+  assert.match(text, /No diagram for 1 other changed file: it makes no direct calls between functions within the file\./)
+})
+
+// ---------- v1.2.1: collision-proof labels (F-A4, FD-V4) ----------
+
+function participantLabelsOf(text) {
+  return [...text.matchAll(/participant P\d+ as (.+)/g)].map((m) => m[1])
+}
+
+function assertLabelsDistinct(text) {
+  const labels = participantLabelsOf(text)
+  assert.ok(labels.length > 0)
+  assert.equal(new Set(labels).size, labels.length, `labels not distinct: ${labels.join(' | ')}`)
+}
+
+test('F-A4: functions sharing the 40-character prefix render with distinct labels', () => {
+  const src = HEADER + `define([], function () {
+  function updateCustomerBillingAddressAndPaymentMethodAlpha() { helperLeaf(); }
+  function updateCustomerBillingAddressAndPaymentMethodBeta() { helperLeaf(); }
+  function helperLeaf() { return 1; }
+  function main() {
+    updateCustomerBillingAddressAndPaymentMethodAlpha();
+    updateCustomerBillingAddressAndPaymentMethodBeta();
+  }
+  return { execute: main };
+});
+`
+  const d = extractCallDiagram(src)
+  assert.ok(d)
+  const text = renderDiagramSection([{ file: 'long.js', ...d }]).join('\n')
+  assertLabelsDistinct(text)
+  // The disambiguation is the participant number, on box and arrow
+  // alike. (Traversal order makes helperLeaf P3 and Beta P4: Beta is
+  // reached after Alpha's own call is expanded.)
+  assert.match(text, /participant P2 as updateCustomerBillingAddressAndPaymentMe… \(P2\)/)
+  assert.match(text, /participant P4 as updateCustomerBillingAddressAndPaymentMe… \(P4\)/)
+  assert.match(text, /P1->>P2: updateCustomerBillingAddressAndPaymentMe… \(P2\)/)
+  assert.match(text, /P1->>P4: updateCustomerBillingAddressAndPaymentMe… \(P4\)/)
+})
+
+test('F-A4: names differing only in a sanitised-away character render with distinct labels', () => {
+  const d = sampleDiagram({
+    participants: ['a\u200Cb', 'a_b', 'main'],
+    entryPoints: ['main'],
+    calls: [
+      { from: 'main', to: 'a\u200Cb' },
+      { from: 'main', to: 'a_b' },
+    ],
+  })
+  const text = renderDiagramSection([d]).join('\n')
+  assertLabelsDistinct(text)
+  assert.match(text, /participant P1 as a_b \(P1\)/)
+  assert.match(text, /participant P2 as a_b \(P2\)/)
+})
+
+test('F-A4 adversarial: hostile colliding names keep the block shape and distinct labels', () => {
+  const hostile = sampleDiagram({
+    participants: ['x (P2)', 'x _P2_', 'main'],
+    entryPoints: ['main'],
+    calls: [
+      { from: 'main', to: 'x (P2)' },
+      { from: 'main', to: 'x _P2_' },
+    ],
+  })
+  const text = renderDiagramSection([hostile]).join('\n')
+  assert.equal((text.match(/```/g) || []).length, 2)
+  assertLabelsDistinct(text)
+  const block = text.split('```mermaid\n')[1].split('\n```')[0]
+  for (const line of block.split('\n')) {
+    assert.match(
+      line,
+      /^(sequenceDiagram|    participant P\d+ as .+|    Note over P\d+: entry point|    P\d+->>P\d+: .+)$/,
+      `unexpected line in diagram block: ${line}`,
+    )
+  }
+})
+
+// ---------- v1.2.1: readability-derived caps (F-F2) ----------
+
+test('F-F2: the caps are the values the rendered-size measurement derived', () => {
+  // Mermaid 10.9.3, real font metrics, production extractor and
+  // renderer: 8 participants render 1,650 px wide (budget: two
+  // ~860 px comment columns); 9 render 1,850 px. At 8 participants,
+  // 36 calls render 1,902 px tall; 40 render 2,094 px.
+  assert.equal(MAX_DIAGRAM_PARTICIPANTS, 8)
+  assert.equal(MAX_DIAGRAM_CALLS, 36)
+})
+
+function denseSource(callTarget) {
+  const names = ['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7']
+  const edges = []
+  for (let i = 0; i < names.length && edges.length < callTarget; i++) {
+    for (let s = 1; s < names.length && edges.length < callTarget; s++) {
+      edges.push([names[i], names[(i + s) % names.length]])
+    }
+  }
+  const by = new Map()
+  for (const [a, b] of edges) {
+    if (!by.has(a)) by.set(a, [])
+    by.get(a).push(b)
+  }
+  const body = names
+    .map((n) => `  function ${n}() { ${(by.get(n) || []).map((o) => `${o}();`).join(' ')} }`)
+    .join('\n')
+  return HEADER + `define([], function () {\n${body}\n  return { execute: n0 };\n});\n`
+}
+
+test('F-F2: exactly at the new call cap is drawn; one past it is overCap', () => {
+  const at = extractCallDiagram(denseSource(MAX_DIAGRAM_CALLS))
+  assert.equal(at.participants.length, MAX_DIAGRAM_PARTICIPANTS)
+  assert.equal(at.calls.length, MAX_DIAGRAM_CALLS)
+  assert.equal(at.overCap, false)
+  const over = extractCallDiagram(denseSource(MAX_DIAGRAM_CALLS + 1))
+  assert.equal(over.calls.length, MAX_DIAGRAM_CALLS + 1)
+  assert.equal(over.overCap, true)
+})
+
+test('render: renderSummary carries the key when a diagram is drawn', () => {
+  const result = {
+    project: { name: 'Demo', type: 'ACCOUNTPROJECT', frameworkVersion: '1.0', manifestPath: 'src/manifest.xml' },
+    scripts: [],
+    moduleUsage: [],
+    byType: [],
+    warnings: [],
+    stats: { scriptCount: 0, dependencyCount: 0, typeCount: 0, warningCount: 0 },
+    checks: {
+      skipped: null, findings: [], changedCount: 1, examinedCount: 1,
+      notCompared: 0, notExamined: 0, diagrams: [sampleDiagram()],
+    },
+  }
+  const md = renderSummary(result)
+  assert.ok(md.includes(DIAGRAM_KEY))
+  assert.ok(md.includes(DIAGRAM_KEY_SEMANTICS))
+  assert.ok(md.includes('```mermaid'))
 })
