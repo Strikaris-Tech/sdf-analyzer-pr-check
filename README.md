@@ -1,6 +1,6 @@
 # SDF Analyzer — PR Check by Strikaris
 
-A free GitHub Action that analyzes a NetSuite SuiteCloud Development Framework (SDF) project on every pull request and posts the results as a pull-request comment: a **script inventory**, a **dependency map** of the `N/` modules your scripts use, and **sanity checks** (a missing or unparseable manifest, scripts that fail to parse). On every pull request it also runs **six pattern checks** over the files the pull request changed — and reports only the findings that pull request introduces.
+A free GitHub Action that analyzes a NetSuite SuiteCloud Development Framework (SDF) project on every pull request and posts the results as a pull-request comment: a **script inventory**, a **dependency map** of the `N/` modules your scripts use, and **sanity checks** (a missing or unparseable manifest, scripts that fail to parse). On every pull request it also runs **six pattern checks** over the files the pull request changed — and reports only the findings that pull request introduces — and includes a **call diagram** for each changed file: a sequence diagram of the direct calls between the functions within that file.
 
 Repositories that are not SDF projects are covered too: if there is no project to analyze, the Action inventories the **loose SuiteScript files** in the repository instead (see "Two modes" below).
 
