@@ -12,7 +12,7 @@
 const path = require('node:path')
 const core = require('@actions/core')
 const github = require('@actions/github')
-const { analyze } = require('./analyzer')
+const { analyze, assertUsableProjectRoot } = require('./analyzer')
 const { renderSummary, upsertComment } = require('./comment')
 
 const COMMENT_MODES = new Set(['sticky', 'new', 'off'])
@@ -26,6 +26,10 @@ async function run() {
 
     const workspace = process.env.GITHUB_WORKSPACE || process.cwd()
     const projectRoot = path.resolve(workspace, projectPathInput)
+
+    // A mistyped project-path must fail loudly here; without this check
+    // it was indistinguishable from an honestly empty repository (D3).
+    await assertUsableProjectRoot(projectRoot, projectPathInput)
 
     const result = await analyze(projectRoot)
     const summary = renderSummary(result, { projectRoot })
@@ -70,17 +74,26 @@ async function postComment(token, summary, mode) {
     return
   }
   const octokit = github.getOctokit(token)
-  const outcome = await upsertComment(
-    octokit,
-    {
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      issueNumber: subject.number,
-    },
-    summary,
-    mode,
-  )
-  core.info(`Pull-request comment ${outcome}.`)
+  // The results already live in the outputs and the job summary; a
+  // comment that cannot be posted must not fail the whole run and take
+  // them down with it (D1) — warn instead.
+  try {
+    const outcome = await upsertComment(
+      octokit,
+      {
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        issueNumber: subject.number,
+      },
+      summary,
+      mode,
+    )
+    core.info(`Pull-request comment ${outcome}.`)
+  } catch (err) {
+    core.warning(
+      `Could not post the pull-request comment: ${err && err.message ? err.message : String(err)}`,
+    )
+  }
 }
 
 run()

@@ -10,6 +10,7 @@ const acorn = require('acorn')
 
 const {
   analyze,
+  assertUsableProjectRoot,
   parseScript,
   extractDependencies,
   extractExports,
@@ -127,4 +128,40 @@ test('analyze on an empty directory warns about manifest and SuiteScripts, never
   assert.equal(result.stats.warningCount, 2)
   assert.ok(result.warnings.some((w) => /manifest\.xml/.test(w.message)))
   assert.ok(result.warnings.some((w) => /SuiteScripts/.test(w.message)))
+})
+
+// ---------- D3: a nonexistent project-path must fail, not read as empty ----------
+// Regression tests for adversarial-pass D3: before the fix, a typo in
+// project-path produced a green run claiming the repository was empty.
+
+test('D3: assertUsableProjectRoot rejects a path that does not exist, naming it', async () => {
+  const missing = path.join(os.tmpdir(), 'sdf-action-no-such-dir-2026')
+  await assert.rejects(
+    () => assertUsableProjectRoot(missing, 'does/not/exist'),
+    (err) => {
+      assert.match(err.message, /project-path "does\/not\/exist" does not exist/)
+      assert.ok(err.message.includes(missing), 'error names the resolved path')
+      return true
+    },
+  )
+})
+
+test('D3: assertUsableProjectRoot rejects a file as project-path, naming it', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sdf-action-filepath-'))
+  const file = path.join(dir, 'realfile.js')
+  await fs.writeFile(file, '// not a directory\n')
+  await assert.rejects(
+    () => assertUsableProjectRoot(file, 'realfile.js'),
+    (err) => {
+      assert.match(err.message, /project-path "realfile\.js" is not a directory/)
+      assert.ok(err.message.includes(file), 'error names the resolved path')
+      return true
+    },
+  )
+})
+
+test('D3: assertUsableProjectRoot accepts an existing directory, empty or not', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sdf-action-okdir-'))
+  await assertUsableProjectRoot(dir, '.')
+  await assertUsableProjectRoot(MINIMAL, 'tests/fixtures/minimal-sdf')
 })
