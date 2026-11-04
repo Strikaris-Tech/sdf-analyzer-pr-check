@@ -77,10 +77,42 @@ const MAX_DIAGRAM_LABEL_CHARS = 40
 // The diagram section's scope sentence, printed in every rendering
 // that mentions diagrams — including the budget-omitted one — so an
 // absent or partial diagram can never read as a complete call graph.
+// It names only what is genuinely excluded: calls into other files,
+// and calls made through a variable (a callee that is not a bare
+// function name). Calls made inside a callback are NOT excluded —
+// they are drawn as the containing function's calls — so the note
+// must not claim otherwise (diagram audit F-A2); the key below
+// carries that disclosure.
 const DIAGRAM_SCOPE_NOTE =
   '_Diagrams show direct calls between functions within each changed ' +
-  'file only — calls into other files, or through variables and ' +
-  'callbacks, are not shown._'
+  'file only — calls into other files, or through variables, are ' +
+  'not shown._'
+
+// The diagram section's key (diagram audit F-F1), printed once under
+// the heading whenever a diagram is drawn. The first line decodes
+// what the drawing shows: a box is a function defined in the file,
+// an arrow is a direct call, a note marks an entry point. The second
+// states the reduced semantics the drawing flattens (F-A2): messages
+// run in call order from each entry point; one arrow stands for a
+// pair of functions however many call sites exist; a call inside a
+// condition or a loop is drawn the same as a call that always runs;
+// a call inside a callback is drawn as a call of the function that
+// contains the callback; and calls are shown without returns (F-F4).
+// One standard text in configuration, so it can never drift between
+// renderings. Static text — no author content reaches it.
+const DIAGRAM_KEY =
+  '_Key: each box is a function defined in this file, and an arrow ' +
+  'is a direct call to the function named on the arrow. A note ' +
+  'marks an entry point — a function NetSuite calls directly._'
+
+const DIAGRAM_KEY_SEMANTICS =
+  '_Messages run in call order from each entry point, following ' +
+  'each call into the function it reaches. One arrow stands for a ' +
+  'pair of functions, however many times the call appears in the ' +
+  'code. A call inside a condition or a loop is drawn the same as ' +
+  'a call that always runs, and a call inside a callback is drawn ' +
+  'as a call of the function that contains the callback. Calls are ' +
+  'shown without returns._'
 
 // Printed in place of the diagrams when the comment has no room to
 // print them whole: an omitted diagram is stated, never implied.
@@ -336,31 +368,52 @@ function renderChecksSection(checks, findingRowLimit) {
 // prints the budget note instead of any block. A file whose diagram
 // exceeded the extraction caps is named with its omission stated —
 // never drawn partially, because a partial diagram would assert a
-// call picture that is not the file's. The scope note closes every
-// rendering, including the omitted one.
+// call picture that is not the file's. Every examined file is
+// accounted for (diagram audit F-A3/F-C1): named here when it is
+// drawn, omitted for size, or carrying calls omitted for ambiguity —
+// and otherwise counted in the closing line for files with no direct
+// intra-file calls. The scope note closes every rendering, including
+// the omitted one.
 function renderDiagramSection(diagrams, diagramMode = 'full') {
-  const drawable = (diagrams || []).filter(
-    (d) => d && ((d.calls && d.calls.length > 0) || d.overCap),
-  )
-  if (drawable.length === 0) return []
+  const records = (diagrams || []).filter((d) => d && typeof d === 'object')
+  if (records.length === 0) return []
+
+  const named = records.filter((d) => isNamedDiagramRecord(d))
+  const uncalled = records.filter((d) => !isNamedDiagramRecord(d))
 
   const lines = []
   lines.push('### Call diagrams for changed files')
   lines.push('')
   if (diagramMode === 'omitted') {
-    lines.push(DIAGRAM_BUDGET_NOTE)
-    lines.push('')
+    if (named.length > 0) {
+      lines.push(DIAGRAM_BUDGET_NOTE)
+      lines.push('')
+    }
+    if (uncalled.length > 0) {
+      lines.push(noDiagramLine(uncalled.length, named.length > 0))
+      lines.push('')
+    }
     lines.push(DIAGRAM_SCOPE_NOTE)
     lines.push('')
     return lines
   }
 
   const fileLimit = diagramMode === 'reduced' ? MAX_DIAGRAM_FILES_REDUCED : MAX_DIAGRAM_FILES
-  const shown = drawable.slice(0, fileLimit)
+  const shown = named.slice(0, fileLimit)
+  if (shown.some((d) => !d.overCap && d.calls && d.calls.length > 0)) {
+    lines.push(DIAGRAM_KEY)
+    lines.push('')
+    lines.push(DIAGRAM_KEY_SEMANTICS)
+    lines.push('')
+  }
   for (const d of shown) lines.push(...renderFileDiagram(d))
-  if (drawable.length > shown.length) {
-    const rest = drawable.length - shown.length
+  if (named.length > shown.length) {
+    const rest = named.length - shown.length
     lines.push(`_Call diagrams for ${rest} more changed file${plural(rest)} are omitted._`)
+    lines.push('')
+  }
+  if (uncalled.length > 0) {
+    lines.push(noDiagramLine(uncalled.length, named.length > 0))
     lines.push('')
   }
   lines.push(DIAGRAM_SCOPE_NOTE)
@@ -368,14 +421,37 @@ function renderDiagramSection(diagrams, diagramMode = 'full') {
   return lines
 }
 
-// One file's diagram — or, when the file exceeded the extraction caps,
-// its omission line. Participant identifiers are generated here
-// (P1, P2, ...), never taken from the source, so no author-chosen
-// name can collide with Mermaid's grammar; source names appear only
-// as labels, which sanitizeDiagramLabel reduces to a safe set. Call
-// messages are emitted in the extraction's source order; a self-call
-// renders as a message from a participant to itself, which Mermaid
-// draws as a loop.
+// A record earns a per-file entry in the section when it carries
+// something the reader must not miss: a drawable diagram, a size
+// omission to state, or calls omitted for ambiguity. A record with
+// none of those was examined and found to make no direct intra-file
+// calls; the closing line counts it instead.
+function isNamedDiagramRecord(d) {
+  return !!((d.calls && d.calls.length > 0) || d.overCap || d.ambiguousCalls > 0)
+}
+
+// The closing accounting line for examined files with no diagram:
+// their work runs through N/ modules — the commonest SuiteScript
+// shape — and the section says so with a count, so its contents
+// reconcile with the pull request's changed files (F-C1).
+function noDiagramLine(count, anyNamed) {
+  return (
+    `_No diagram for ${count} ${anyNamed ? 'other ' : ''}changed ` +
+    `file${plural(count)}: ${count === 1 ? 'it makes' : 'they make'} ` +
+    'no direct calls between functions within the file._'
+  )
+}
+
+// One file's entry in the section: its diagram — or, when the file
+// exceeded the extraction caps, its omission line — followed by the
+// ambiguity line when the extractor omitted calls for that file.
+// Participant identifiers are generated here (P1, P2, ...), never
+// taken from the source, so no author-chosen name can collide with
+// Mermaid's grammar; source names appear only as labels, which
+// diagramLabels reduces to a safe, collision-free set. Call messages
+// are emitted in the extraction's call order from the entry points;
+// a self-call renders as a message from a participant to itself,
+// which Mermaid draws as a loop.
 function renderFileDiagram(d) {
   const lines = []
   const shownPath = String(d.file).replace(/[`\r\n]/g, '')
@@ -386,9 +462,18 @@ function renderFileDiagram(d) {
       'direct calls in its diagram, the printed cap._',
     )
     lines.push('')
+    if (d.ambiguousCalls > 0) lines.push(...diagramAmbiguityLines(d))
+    return lines
+  }
+  if (!d.calls || d.calls.length === 0) {
+    // Nothing drawable: the only fact to state is the ambiguity
+    // loss, when there is one. (A record with neither is counted by
+    // the section's closing line and never reaches this function.)
+    if (d.ambiguousCalls > 0) lines.push(...diagramAmbiguityLines(d))
     return lines
   }
 
+  const labels = diagramLabels(d)
   const alias = new Map()
   lines.push(`**\`${shownPath}\`**`)
   lines.push('')
@@ -397,19 +482,61 @@ function renderFileDiagram(d) {
   d.participants.forEach((name, i) => {
     const id = `P${i + 1}`
     alias.set(name, id)
-    lines.push(`    participant ${id} as ${sanitizeDiagramLabel(name)}`)
+    lines.push(`    participant ${id} as ${labels.get(name)}`)
   })
   for (const name of d.entryPoints || []) {
     if (alias.has(name)) lines.push(`    Note over ${alias.get(name)}: entry point`)
   }
   for (const call of d.calls) {
     lines.push(
-      `    ${alias.get(call.from)}->>${alias.get(call.to)}: ${sanitizeDiagramLabel(call.to)}`,
+      `    ${alias.get(call.from)}->>${alias.get(call.to)}: ${labels.get(call.to)}`,
     )
   }
   lines.push('```')
   lines.push('')
+  if (d.ambiguousCalls > 0) lines.push(...diagramAmbiguityLines(d))
   return lines
+}
+
+// The line that keeps an ambiguity omission visible (diagram audit
+// F-A3): the extractor counted the calls it could not draw — a call
+// touching a function name defined more than once in the file is
+// omitted, never guessed — and the section prints that count for the
+// file instead of letting the calls vanish silently.
+function diagramAmbiguityLines(d) {
+  const shownPath = String(d.file).replace(/[`\r\n]/g, '')
+  const n = d.ambiguousCalls
+  return [
+    `_\`${shownPath}\` — ${n} direct call${plural(n)} ${n === 1 ? 'is' : 'are'} not shown — ` +
+      'a function name is defined more than once in this file, so ' +
+      `${n === 1 ? 'that call' : 'those calls'} cannot be drawn unambiguously._`,
+    '',
+  ]
+}
+
+// The label each participant is drawn under in one file's diagram.
+// Labels come from sanitizeDiagramLabel; when two functions in the
+// same file would render with the SAME label — a shared prefix at
+// the 40-character cap, or names that differ only in a character the
+// sanitiser maps to an underscore — the drawing could not tell them
+// apart (diagram audit F-A4), so each colliding label gains its
+// participant number. A sanitised label can never contain the
+// suffix's parentheses (the sanitiser maps them to underscores) and
+// the number is unique within the diagram, so a suffixed label
+// cannot collide with any other label in the file. Message labels
+// use the same map, so an arrow names its target exactly as the
+// target's box does.
+function diagramLabels(d) {
+  const base = new Map()
+  for (const name of d.participants) base.set(name, sanitizeDiagramLabel(name))
+  const counts = new Map()
+  for (const label of base.values()) counts.set(label, (counts.get(label) || 0) + 1)
+  const labels = new Map()
+  d.participants.forEach((name, i) => {
+    const label = base.get(name)
+    labels.set(name, counts.get(label) > 1 ? `${label} (P${i + 1})` : label)
+  })
+  return labels
 }
 
 // The only author-controlled text that reaches the Mermaid block is a
@@ -569,6 +696,8 @@ module.exports = {
   MAX_DIAGRAM_FILES,
   FINDINGS_SCOPE_SENTENCE,
   DIAGRAM_SCOPE_NOTE,
+  DIAGRAM_KEY,
+  DIAGRAM_KEY_SEMANTICS,
   renderSummary,
   renderChecksSection,
   renderDiagramSection,
