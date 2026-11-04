@@ -645,7 +645,7 @@ function subtractFindings(headFindings, baseFindings) {
 //   findings: [{ check, file, line, message, onAddedLine }],
 //   changedCount, examinedCount, notCompared, notExamined,
 //   diagrams: [{ file, participants, entryPoints, calls,
-//                ambiguousCalls, overCap }],
+//                ambiguousCalls, overCap }],   // one per examined file
 // }
 //
 // The diagrams ride along with the examination: the same head sources
@@ -759,12 +759,18 @@ async function runPatternChecks({
     }
 
     examinedCount += 1
-    // The diagram is drawn from the head version only, and only when
-    // there is something to draw: at least one direct call, or a file
-    // whose diagram had to be omitted for size (the renderer says so
-    // rather than letting the file vanish from the section silently).
+    // The diagram is drawn from the head version only. Every examined
+    // file contributes its record — drawn, omitted for size, or with
+    // nothing to draw — so the renderer can account for each file in
+    // the section (diagram audit F-C1): a file whose work runs
+    // entirely through N/ modules is counted in the section's closing
+    // line rather than vanishing from it. extractCallDiagram cannot
+    // return null here in practice: the checks and the diagram pass
+    // parse with the same options, and this file has already parsed
+    // successfully above; the guard stays so a null can never crash
+    // the examination.
     const diagram = extractCallDiagram(headSource)
-    if (diagram && (diagram.calls.length > 0 || diagram.overCap)) {
+    if (diagram) {
       diagrams.push({ file: f.displayPath, ...diagram })
     }
     for (const hit of subtractFindings(headFindings, baseFindings)) {

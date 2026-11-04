@@ -5,7 +5,8 @@
 // returning the facts the diagram is drawn from — the file's function
 // definitions, the binding from each entry-point export to the
 // function that implements it, and the literal direct calls between
-// those functions inside the same file, in source order.
+// those functions inside the same file, ordered as a call sequence
+// starting from the file's entry points.
 //
 // The reduced form is deliberate, and the boundary is the product
 // decision recorded for this feature: direct calls only. A call counts
@@ -33,8 +34,23 @@ const walk = require('acorn-walk')
 // diagram cut off mid-way would assert calls that were never the
 // whole picture. The caps bound what is DRAWN (functions appearing in
 // a call, plus entry-point functions), not what a file may contain.
-const MAX_DIAGRAM_PARTICIPANTS = 24
-const MAX_DIAGRAM_CALLS = 40
+//
+// The values are set from rendered size, not budget arithmetic
+// (diagram audit F-F2, v1.2.1). Measured with Mermaid 10.9.3 — the
+// version GitHub renders with — under real font metrics, through
+// this extractor and renderer, on synthetic files with realistic
+// SuiteScript names: the natural width grows about 200 px per
+// participant (8 participants render 1,650 px wide; 9 render
+// 1,850 px) against a readability budget of two ~860 px comment
+// columns (1,720 px); the height grows about 48 px per call (at 8
+// participants, 36 calls render 1,902 px tall; 40 render 2,094 px).
+// The previous caps (24 participants, 40 calls) rendered 4,860 px
+// wide — about four of twenty-four participants visible at once in
+// the comment column. The calibration is on realistic names, as the
+// audit's measurement was; names at the 40-character label cap widen
+// a box past it.
+const MAX_DIAGRAM_PARTICIPANTS = 8
+const MAX_DIAGRAM_CALLS = 36
 
 // The diagram pass parses each examined head file itself, with the
 // same options family as the pattern checks. Locations are not
@@ -52,9 +68,11 @@ const PARSE_OPTIONS = {
 // not examinable for the pattern checks; a diagram must never be
 // drawn from a partial read). Otherwise returns:
 // {
-//   participants: [name, ...],       // drawn functions, in definition order
+//   participants: [name, ...],       // drawn functions: entry points first,
+//                                     // then first-reached order
 //   entryPoints: [name, ...],        // participants that implement an export
-//   calls: [{ from, to }, ...],      // distinct direct calls, source order
+//   calls: [{ from, to }, ...],      // distinct direct calls, in call order
+//                                     // from the entry points (F-A1)
 //   ambiguousCalls: n,               // direct calls omitted as ambiguous
 //   overCap: bool,                   // drawn size would exceed a cap
 // }
@@ -100,40 +118,116 @@ function extractCallDiagram(source) {
     },
   })
 
-  // Source order, then de-duplicated: the diagram shows which
-  // functions call which, in the order the calls first appear.
+  // De-duplicated edges, grouped per caller in body order: the sites
+  // are offset-sorted first, so each caller's list is the order its
+  // calls appear in its own body.
   sites.sort((a, b) => a.start - b.start)
-  const seen = new Set()
-  const calls = []
+  const adjacency = new Map()
   for (const site of sites) {
-    const key = `${site.from}\0${site.to}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    calls.push({ from: site.from, to: site.to })
+    if (!adjacency.has(site.from)) adjacency.set(site.from, [])
+    const outs = adjacency.get(site.from)
+    if (!outs.includes(site.to)) outs.push(site.to)
+  }
+  const edges = []
+  for (const [from, outs] of adjacency) {
+    for (const to of outs) edges.push({ from, to })
   }
 
   // The drawn participants: every function an edge touches, plus the
-  // entry-point functions, in definition order.
+  // entry-point functions.
   const drawn = new Set()
-  for (const call of calls) {
-    drawn.add(call.from)
-    drawn.add(call.to)
+  for (const edge of edges) {
+    drawn.add(edge.from)
+    drawn.add(edge.to)
   }
   for (const name of entryNames) {
     if (byName.has(name) && byName.get(name).length === 1) drawn.add(name)
   }
-  const participants = definitions
-    .filter((def) => drawn.has(def.name) && byName.get(def.name).length === 1)
+  const entryPoints = definitions
+    .filter((def) => drawn.has(def.name) && entryNames.has(def.name))
     .map((def) => def.name)
+
+  // Message order (diagram audit F-A1): the messages are ordered as
+  // a call sequence, not by file offset — start from each entry
+  // point, emit its calls in body order, and expand each callee's own
+  // calls immediately after the call that reaches it, so no
+  // function's internal call is drawn before the call that invokes
+  // it. Functions no entry point reaches are traversed afterwards,
+  // in definition order, so every extracted edge is still drawn
+  // exactly once. The traversal works only on the edge set above:
+  // no call is resolved, inferred, or added.
+  const { calls, reachOrder } = orderCallsByTraversal(
+    adjacency, entryPoints, definitions.map((def) => def.name),
+  )
+
+  // Participant order (F-F3): entry points first, then the remaining
+  // functions in the order the traversal first reaches them — the
+  // reader starts where execution starts.
+  const participants = []
+  const placed = new Set()
+  for (const name of [...entryPoints, ...reachOrder]) {
+    if (drawn.has(name) && !placed.has(name)) {
+      placed.add(name)
+      participants.push(name)
+    }
+  }
 
   return {
     participants,
-    entryPoints: participants.filter((name) => entryNames.has(name)),
+    entryPoints,
     calls,
     ambiguousCalls,
     overCap: participants.length > MAX_DIAGRAM_PARTICIPANTS
       || calls.length > MAX_DIAGRAM_CALLS,
   }
+}
+
+// Order the distinct edges as a call sequence: an iterative
+// depth-first walk (an explicit stack, so a pathologically deep call
+// chain cannot overflow the call stack). Each edge is emitted once;
+// a callee's edges are emitted immediately after the edge that
+// reaches it, before the caller's next edge — the nesting an
+// execution would have. Cycles terminate: an emitted edge is never
+// emitted again, and a frame is pushed only when an edge is emitted,
+// so the walk is bounded by the edge count. Returns the ordered
+// calls and the order in which functions are first reached.
+function orderCallsByTraversal(adjacency, roots, callerOrder) {
+  const emitted = new Set()
+  const calls = []
+  const reachOrder = []
+  const reached = new Set()
+  const reach = (name) => {
+    if (!reached.has(name)) {
+      reached.add(name)
+      reachOrder.push(name)
+    }
+  }
+  const visit = (root) => {
+    const stack = [[root, 0]]
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]
+      const outs = adjacency.get(frame[0]) || []
+      if (frame[1] >= outs.length) {
+        stack.pop()
+        continue
+      }
+      const to = outs[frame[1]]
+      frame[1] += 1
+      const key = `${frame[0]}\0${to}`
+      if (emitted.has(key)) continue
+      emitted.add(key)
+      calls.push({ from: frame[0], to })
+      reach(frame[0])
+      reach(to)
+      stack.push([to, 0])
+    }
+  }
+  for (const root of roots) visit(root)
+  for (const caller of callerOrder) {
+    const outs = adjacency.get(caller) || []
+    if (outs.some((to) => !emitted.has(`${caller}\0${to}`))) visit(caller)
+  }
+  return { calls, reachOrder }
 }
 
 // One definition record per named function the file declares, in
