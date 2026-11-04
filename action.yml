@@ -1,5 +1,5 @@
 name: 'SDF Analyzer — PR Check'
-description: 'Inventories SuiteScript files and maps N/ module dependencies in NetSuite SDF projects on every pull request.'
+description: 'Inventories SuiteScripts, maps N/ dependencies, and pattern-checks changed code on NetSuite SDF pull requests.'
 author: 'Strikaris'
 
 branding:
@@ -23,6 +23,10 @@ inputs:
     description: 'If `true`, the Action exits non-zero when analyzer warnings are found (parse errors, missing manifests). Useful as a merge gate.'
     required: false
     default: 'false'
+  fail-on-findings:
+    description: 'If `true`, the Action exits non-zero when the pattern checks report new findings on the pull request. Separate from `fail-on-issues`: warnings and findings are gated independently.'
+    required: false
+    default: 'false'
 
 outputs:
   script-count:
@@ -31,6 +35,10 @@ outputs:
     description: 'Number of unique N/ module dependencies detected across all scripts found.'
   has-issues:
     description: '`true` if the analyzer flagged any warnings (manifest missing, script parse errors, etc.).'
+  findings-count:
+    description: 'Number of new pattern-check findings the pull request introduces (0 on non-pull-request runs and when the checks were skipped).'
+  has-findings:
+    description: '`true` if the pattern checks reported any new findings on the pull request.'
   summary-markdown:
     description: 'The rendered markdown summary (same as the PR comment body) for downstream consumers.'
 
