@@ -3,6 +3,7 @@
 // posting takes an octokit-shaped client so tests can substitute a fake.
 
 const path = require('node:path')
+const { MAX_DIAGRAM_PARTICIPANTS, MAX_DIAGRAM_CALLS } = require('./diagram')
 
 // Hidden marker embedded in every comment this action posts, so sticky mode
 // can find (and update) its own previous comment on a pull request.
@@ -61,6 +62,32 @@ const FINDINGS_SCOPE_SENTENCE =
   'project, data flow within and between files, deployments, roles, ' +
   'and configuration are not examined._'
 
+// The call-diagram section (the reduced Mermaid sequence diagrams,
+// v1.2.0): one diagram per changed file, drawn from the direct calls
+// within that file (src/diagram.js). File caps here bound how many
+// diagrams one comment carries; the per-file caps on functions and
+// calls live in src/diagram.js. The section is the comment's garnish,
+// never its substance: the render attempts in renderSummary sacrifice
+// it — reduced, then omitted with a printed note — before any
+// inventory, issues, or findings content shrinks.
+const MAX_DIAGRAM_FILES = 5
+const MAX_DIAGRAM_FILES_REDUCED = 1
+const MAX_DIAGRAM_LABEL_CHARS = 40
+
+// The diagram section's scope sentence, printed in every rendering
+// that mentions diagrams — including the budget-omitted one — so an
+// absent or partial diagram can never read as a complete call graph.
+const DIAGRAM_SCOPE_NOTE =
+  '_Diagrams show direct calls between functions within each changed ' +
+  'file only — calls into other files, or through variables and ' +
+  'callbacks, are not shown._'
+
+// Printed in place of the diagrams when the comment has no room to
+// print them whole: an omitted diagram is stated, never implied.
+const DIAGRAM_BUDGET_NOTE =
+  '_Call diagrams are omitted from this comment — there is not room ' +
+  'to print them whole._'
+
 // Manifest fields are project-authored text interpolated into a comment
 // posted under the github-actions identity: newlines and markdown
 // control characters are stripped and the value is length-capped before
@@ -81,19 +108,35 @@ function sanitizeManifestField(value) {
     : cleaned
 }
 
+// Render attempts, in order: full lists with the diagrams whole,
+// then the diagrams reduced, then the diagrams omitted — and only
+// after that do the lists themselves shrink. The diagram is
+// decoration; the findings are the product, so the diagram is always
+// the first thing the budget takes. When a result carries no
+// diagrams, every diagram mode renders identically and the sequence
+// is exactly the historical list-stage progression.
+const RENDER_ATTEMPTS = [
+  { stage: 0, diagram: 'full' },
+  { stage: 0, diagram: 'reduced' },
+  { stage: 0, diagram: 'omitted' },
+  ...LIST_LIMIT_STAGES.slice(1).map((_, i) => ({ stage: i + 1, diagram: 'omitted' })),
+]
+
 function renderSummary(result, { projectRoot } = {}) {
-  for (let stage = 0; stage < LIST_LIMIT_STAGES.length; stage++) {
-    const body = renderWithinLimits(result, projectRoot, LIST_LIMIT_STAGES[stage], stage > 0)
+  for (const attempt of RENDER_ATTEMPTS) {
+    const body = renderWithinLimits(
+      result, projectRoot, LIST_LIMIT_STAGES[attempt.stage], attempt.stage > 0, attempt.diagram,
+    )
     if (body.length <= MAX_COMMENT_CHARS) return body
   }
   // Even counts-and-headers rendering can overflow when a single path or
   // name is enormous; the final guard makes the budget unconditional.
   return truncateToBudget(
-    renderWithinLimits(result, projectRoot, LIST_LIMIT_STAGES[LIST_LIMIT_STAGES.length - 1], true),
+    renderWithinLimits(result, projectRoot, LIST_LIMIT_STAGES[LIST_LIMIT_STAGES.length - 1], true, 'omitted'),
   )
 }
 
-function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
+function renderWithinLimits(result, projectRoot, limits, budgetTruncated, diagramMode = 'full') {
   const { project, scripts, moduleUsage, byType, warnings, stats } = result
   const mode = result.mode || 'project'
   const outsideSuiteScripts = result.outsideSuiteScripts || []
@@ -215,6 +258,12 @@ function renderWithinLimits(result, projectRoot, limits, budgetTruncated) {
   // run has no section at all, exactly as before.
   if (result.checks) {
     lines.push(...renderChecksSection(result.checks, limits.findings))
+    // The diagram section follows the pattern checks. It renders only
+    // on pull-request runs whose examination produced diagram data;
+    // skipped checks and non-pull-request runs have no section.
+    lines.push(...renderDiagramSection(
+      result.checks.skipped ? null : result.checks.diagrams, diagramMode,
+    ))
   }
   if (budgetTruncated) {
     lines.push(TRUNCATION_NOTE)
@@ -281,6 +330,108 @@ function renderChecksSection(checks, findingRowLimit) {
   return lines
 }
 
+// The call-diagram section: one Mermaid sequence diagram per changed
+// file, in the examination's deterministic path order. Mode 'full'
+// draws up to MAX_DIAGRAM_FILES files; 'reduced' draws one; 'omitted'
+// prints the budget note instead of any block. A file whose diagram
+// exceeded the extraction caps is named with its omission stated —
+// never drawn partially, because a partial diagram would assert a
+// call picture that is not the file's. The scope note closes every
+// rendering, including the omitted one.
+function renderDiagramSection(diagrams, diagramMode = 'full') {
+  const drawable = (diagrams || []).filter(
+    (d) => d && ((d.calls && d.calls.length > 0) || d.overCap),
+  )
+  if (drawable.length === 0) return []
+
+  const lines = []
+  lines.push('### Call diagrams for changed files')
+  lines.push('')
+  if (diagramMode === 'omitted') {
+    lines.push(DIAGRAM_BUDGET_NOTE)
+    lines.push('')
+    lines.push(DIAGRAM_SCOPE_NOTE)
+    lines.push('')
+    return lines
+  }
+
+  const fileLimit = diagramMode === 'reduced' ? MAX_DIAGRAM_FILES_REDUCED : MAX_DIAGRAM_FILES
+  const shown = drawable.slice(0, fileLimit)
+  for (const d of shown) lines.push(...renderFileDiagram(d))
+  if (drawable.length > shown.length) {
+    const rest = drawable.length - shown.length
+    lines.push(`_Call diagrams for ${rest} more changed file${plural(rest)} are omitted._`)
+    lines.push('')
+  }
+  lines.push(DIAGRAM_SCOPE_NOTE)
+  lines.push('')
+  return lines
+}
+
+// One file's diagram — or, when the file exceeded the extraction caps,
+// its omission line. Participant identifiers are generated here
+// (P1, P2, ...), never taken from the source, so no author-chosen
+// name can collide with Mermaid's grammar; source names appear only
+// as labels, which sanitizeDiagramLabel reduces to a safe set. Call
+// messages are emitted in the extraction's source order; a self-call
+// renders as a message from a participant to itself, which Mermaid
+// draws as a loop.
+function renderFileDiagram(d) {
+  const lines = []
+  const shownPath = String(d.file).replace(/[`\r\n]/g, '')
+  if (d.overCap) {
+    lines.push(
+      `_\`${shownPath}\` — its call diagram is omitted: the file has more ` +
+      `than ${MAX_DIAGRAM_PARTICIPANTS} functions or ${MAX_DIAGRAM_CALLS} ` +
+      'direct calls in its diagram, the printed cap._',
+    )
+    lines.push('')
+    return lines
+  }
+
+  const alias = new Map()
+  lines.push(`**\`${shownPath}\`**`)
+  lines.push('')
+  lines.push('```mermaid')
+  lines.push('sequenceDiagram')
+  d.participants.forEach((name, i) => {
+    const id = `P${i + 1}`
+    alias.set(name, id)
+    lines.push(`    participant ${id} as ${sanitizeDiagramLabel(name)}`)
+  })
+  for (const name of d.entryPoints || []) {
+    if (alias.has(name)) lines.push(`    Note over ${alias.get(name)}: entry point`)
+  }
+  for (const call of d.calls) {
+    lines.push(
+      `    ${alias.get(call.from)}->>${alias.get(call.to)}: ${sanitizeDiagramLabel(call.to)}`,
+    )
+  }
+  lines.push('```')
+  lines.push('')
+  return lines
+}
+
+// The only author-controlled text that reaches the Mermaid block is a
+// function or export name, used as a participant or message label.
+// Labels are reduced to letters, digits, spaces and a few inert
+// characters; everything else — brackets, quotes, arrows, semicolons,
+// newlines, Mermaid's own comment marker — becomes an underscore, so
+// an odd or hostile name can neither break the diagram's syntax nor
+// inject a statement into it. Over-long labels are capped.
+const DIAGRAM_LABEL_DISALLOWED = /[^\p{L}\p{N} _.\-$]/gu
+
+function sanitizeDiagramLabel(value) {
+  const cleaned = String(value)
+    .replace(DIAGRAM_LABEL_DISALLOWED, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return 'function'
+  return cleaned.length > MAX_DIAGRAM_LABEL_CHARS
+    ? `${cleaned.slice(0, MAX_DIAGRAM_LABEL_CHARS)}…`
+    : cleaned
+}
+
 // Last-resort budget enforcement: cut the body at a line boundary and
 // re-attach the truncation note and the publisher footer, so the result
 // is within MAX_COMMENT_CHARS no matter what the inputs contained.
@@ -288,10 +439,17 @@ function truncateToBudget(body) {
   if (body.length <= MAX_COMMENT_CHARS) return body
   const tail = `\n---\n${PUBLISHER_LINE}\n`
   const noteLine = `${TRUNCATION_NOTE}\n`
-  const keep = MAX_COMMENT_CHARS - noteLine.length - tail.length - 1
+  const fenceClose = '\n```'
+  const keep = MAX_COMMENT_CHARS - noteLine.length - tail.length - fenceClose.length - 1
   let cut = body.lastIndexOf('\n', keep)
   if (cut <= 0) cut = keep
-  return `${body.slice(0, cut)}\n${noteLine}${tail}`
+  let kept = body.slice(0, cut)
+  // A cut landing inside a fenced block (the Mermaid diagram) would
+  // leave the fence open and swallow the note and the footer into the
+  // block; close the fence so what remains still renders as written.
+  const fences = (kept.match(/```/g) || []).length
+  if (fences % 2 === 1) kept += fenceClose
+  return `${kept}\n${noteLine}${tail}`
 }
 
 // One line naming the symlinked entries the scan skipped: links are
@@ -408,9 +566,13 @@ module.exports = {
   PUBLISHER_LINE,
   MAX_COMMENT_CHARS,
   MAX_FINDING_ROWS,
+  MAX_DIAGRAM_FILES,
   FINDINGS_SCOPE_SENTENCE,
+  DIAGRAM_SCOPE_NOTE,
   renderSummary,
   renderChecksSection,
+  renderDiagramSection,
+  sanitizeDiagramLabel,
   truncateToBudget,
   upsertComment,
 }

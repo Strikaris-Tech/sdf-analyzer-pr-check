@@ -1,6 +1,6 @@
 # SDF Analyzer — PR Check by Strikaris
 
-A free GitHub Action that analyzes a NetSuite SuiteCloud Development Framework (SDF) project on every pull request and posts the results as a pull-request comment: a **script inventory**, a **dependency map** of the `N/` modules your scripts use, and **sanity checks** (a missing or unparseable manifest, scripts that fail to parse). On every pull request it also runs **six pattern checks** over the files the pull request changed — and reports only the findings that pull request introduces.
+A free GitHub Action that analyzes a NetSuite SuiteCloud Development Framework (SDF) project on every pull request and posts the results as a pull-request comment: a **script inventory**, a **dependency map** of the `N/` modules your scripts use, and **sanity checks** (a missing or unparseable manifest, scripts that fail to parse). On every pull request it also runs **six pattern checks** over the files the pull request changed — and reports only the findings that pull request introduces — and includes a **call diagram** for each changed file: a sequence diagram of the direct calls between the functions within that file.
 
 Repositories that are not SDF projects are covered too: if there is no project to analyze, the Action inventories the **loose SuiteScript files** in the repository instead (see "Two modes" below).
 
@@ -53,7 +53,7 @@ If neither an SDF project nor any SuiteScript file is found, the comment says so
 
 ## What it deliberately does not do
 
-The free tier is inventory, dependency map, sanity checks, and the six pattern checks — nothing more. The pattern checks examine only the files a pull request changed, for the six patterns above. They are not an audit: the rest of the project, data flow within and between files, deployments, roles, and configuration are not examined. The Action does not link scripts to their deployment records, does not evaluate governance or compliance rules, and does not produce diagrams or audit reports. It also contains none of the paid analyzer's code: the free engine is a small standalone implementation, kept separate on purpose.
+The free tier is inventory, dependency map, sanity checks, the six pattern checks, and a reduced call diagram for each changed file — nothing more. The pattern checks examine only the files a pull request changed, for the six patterns above. They are not an audit: the rest of the project, data flow within and between files, deployments, roles, and configuration are not examined. The Action does not link scripts to their deployment records, does not evaluate governance or compliance rules, and does not produce audit reports. The call diagram it produces is reduced — one per changed file, showing direct calls within that file only. It does not produce the paid analyzer's whole-project diagrams, which stitch calls across files and resolve indirect references. It also contains none of the paid analyzer's code: the free engine is a small standalone implementation, kept separate on purpose.
 
 ## Inputs
 
