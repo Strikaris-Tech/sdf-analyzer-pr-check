@@ -1,5 +1,5 @@
 name: 'SDF Analyzer — PR Check'
-description: 'Visualize your NetSuite SuiteCloud project on every pull request — script inventory, dependency map, sanity checks. Also inventories loose SuiteScript files in repositories without an SDF project. Zero dev setup required.'
+description: 'Inventories SuiteScript files and maps N/ module dependencies in NetSuite SDF projects on every pull request.'
 author: 'Strikaris'
 
 branding:
