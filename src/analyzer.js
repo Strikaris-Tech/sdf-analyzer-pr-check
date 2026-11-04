@@ -465,4 +465,8 @@ module.exports = {
   readManifest, scanScripts, parseScript, parseLooseScript,
   extractDependencies, extractDependenciesDetailed, extractExports, guessScriptType,
   extractApiVersion,
+  // exported for the pattern checks (src/checks.js), which examine the
+  // changed files under the same resolved SuiteScripts folder the
+  // inventory scans:
+  findSuiteScriptsRoot,
 }
