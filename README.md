@@ -6,6 +6,8 @@ Repositories that are not SDF projects are covered too: if there is no project t
 
 It runs entirely on the GitHub runner inside your own repository. Your code never leaves your GitHub account, and no Strikaris server is involved.
 
+![SDF Analyzer — PR Check running on a pull request](docs/demo.gif)
+
 ## Install
 
 Add a workflow to your repository (for example `.github/workflows/sdf-analysis.yml`):
