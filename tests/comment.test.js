@@ -208,3 +208,123 @@ test('D1: a non-size posting failure still propagates', async () => {
   }
   await assert.rejects(() => upsertComment(octokit, TARGET, 'body', 'new'), /Forbidden/)
 })
+
+// ── D4 (adversarial pass): the sticky lookup paginates ───────────────────
+// The lookup used to read one page of 100 comments; on a busier pull
+// request the action's own marked comment fell off the page and sticky
+// mode posted a duplicate on every run.
+
+function paginatingOctokit(allComments) {
+  const calls = { created: [], updated: [], listPages: [] }
+  const octokit = {
+    rest: {
+      issues: {
+        listComments: async ({ per_page, page }) => {
+          calls.listPages.push(page)
+          const start = (page - 1) * per_page
+          return { data: allComments.slice(start, start + per_page) }
+        },
+        createComment: async (args) => { calls.created.push(args); return { data: { id: 99 } } },
+        updateComment: async (args) => { calls.updated.push(args); return { data: { id: args.comment_id } } },
+      },
+    },
+  }
+  return { octokit, calls }
+}
+
+test('D4: sticky mode finds its marked comment beyond the first page and updates it', async () => {
+  const comments = []
+  for (let i = 1; i <= 149; i++) comments.push({ id: i, body: `human comment ${i}` })
+  comments.push({ id: 500, body: `old report ${COMMENT_MARKER}` })
+  const { octokit, calls } = paginatingOctokit(comments)
+  const outcome = await upsertComment(octokit, TARGET, 'new body', 'sticky')
+  assert.equal(outcome, 'updated')
+  assert.equal(calls.created.length, 0)
+  assert.equal(calls.updated.length, 1)
+  assert.equal(calls.updated[0].comment_id, 500)
+  assert.ok(calls.listPages.includes(2), 'the lookup must request page 2')
+})
+
+test('D4: sticky mode creates exactly one comment when none is marked, however long the thread', async () => {
+  const comments = []
+  for (let i = 1; i <= 230; i++) comments.push({ id: i, body: `human comment ${i}` })
+  const { octokit, calls } = paginatingOctokit(comments)
+  const outcome = await upsertComment(octokit, TARGET, 'new body', 'sticky')
+  assert.equal(outcome, 'created')
+  assert.equal(calls.created.length, 1)
+  assert.equal(calls.updated.length, 0)
+})
+
+// ── D7 (adversarial pass): the truncation note points nowhere false ──────
+// The note once told readers to see the "summary-markdown" output, which
+// carries the truncated text itself. The PR #5 rewording is pinned here:
+// truncation notes state the limit and never reference that output.
+
+test('D7: rendered truncation notes state the limit and never point at summary-markdown', () => {
+  const md = renderSummary(hostileResult({ scriptCount: 60 }))
+  assert.match(md, /only the first 50 are listed/)
+  assert.doesNotMatch(md, /summary-markdown/)
+})
+
+// ── D12 (adversarial pass): manifest fields are sanitized before render ──
+// The project name and type are author-controlled text interpolated into
+// a comment posted under the github-actions identity; newlines and
+// markdown control characters must not survive into it.
+
+test('D12: a manifest name carrying markdown and a newline renders as one plain line', () => {
+  const md = renderSummary(sampleResult({
+    project: {
+      name: 'ACME **bold** | pipe ]]>\nbreak',
+      type: 'ACCOUNTCUSTOMIZATION',
+      frameworkVersion: '1.0',
+      manifestPath: 'src/manifest.xml',
+    },
+  }))
+  assert.match(md, /\*\*Project:\*\* ACME bold pipe break \(ACCOUNTCUSTOMIZATION\)/)
+  assert.doesNotMatch(md, /\*\*bold\*\*/)
+  assert.doesNotMatch(md, /\nbreak/)
+})
+
+test('D12: an over-long manifest name is capped', () => {
+  const md = renderSummary(sampleResult({
+    project: {
+      name: 'x'.repeat(150),
+      type: null,
+      frameworkVersion: '1.0',
+      manifestPath: 'src/manifest.xml',
+    },
+  }))
+  const line = md.split('\n').find((l) => l.startsWith('**Project:**'))
+  assert.ok(line.length <= '**Project:** '.length + 101, `project line too long: ${line.length}`)
+  assert.ok(line.endsWith('…'))
+})
+
+// ── D8 (adversarial pass): the summary names what the scan skipped ───────
+
+test('D8: the summary notes skipped symlinked entries by name', () => {
+  const md = renderSummary(sampleResult({ skippedSymlinks: ['linkdir', 'linkfile.js'] }))
+  assert.match(md, /2 symlinked entries were skipped/)
+  assert.match(md, /`linkdir`/)
+  assert.match(md, /`linkfile\.js`/)
+})
+
+test('D8: no symlink note appears when nothing was skipped', () => {
+  const md = renderSummary(sampleResult())
+  assert.doesNotMatch(md, /symlinked/)
+})
+
+// ── D10 (adversarial pass): unreadable dependency declarations are marked ─
+
+test('D10: an incompletely read declaration is marked in the inventory with its footnote', () => {
+  const result = sampleResult()
+  result.scripts[0].dependenciesIncomplete = true
+  const md = renderSummary(result)
+  assert.match(md, /\| 1 † \|/)
+  assert.match(md, /lower bound/)
+})
+
+test('D10: fully read declarations carry no marker and no footnote', () => {
+  const md = renderSummary(sampleResult())
+  assert.doesNotMatch(md, /†/)
+  assert.doesNotMatch(md, /lower bound/)
+})
