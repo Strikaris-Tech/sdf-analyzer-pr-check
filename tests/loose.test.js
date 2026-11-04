@@ -14,6 +14,7 @@ const {
   extractScriptTypeTag,
   hasSuiteScriptAnnotations,
   extractLooseDependencies,
+  extractLooseDependenciesDetailed,
   findSuiteScriptFiles,
 } = require('../src/suitescript')
 const { analyze } = require('../src/analyzer')
@@ -155,12 +156,17 @@ test('analyze selects loose mode for a folder of SuiteScripts with no project', 
   assert.equal(mapReduce.apiVersion, '2.x')
 })
 
+// D9 (adversarial pass): empty mode reports warningCount 0 — finding
+// nothing is a statement, not an issue, so a no-project repository
+// passes even with fail-on-issues on. (This test asserted 2 before the
+// fix; the warnings it counted were the defect.)
 test('analyze selects empty mode when there is no project and no SuiteScript', async () => {
   const dir = await tempDir()
   const result = await analyze(dir)
   assert.equal(result.mode, 'empty')
   assert.equal(result.stats.scriptCount, 0)
-  assert.equal(result.stats.warningCount, 2)
+  assert.equal(result.stats.warningCount, 0)
+  assert.deepEqual(result.warnings, [])
 })
 
 test('analyze lists a loose SuiteScript that fails to parse, with no dependencies', async () => {
@@ -217,4 +223,134 @@ test('renderSummary notes outside files in project mode and stays silent without
   // Project-mode format is otherwise the pre-loose-mode format.
   assert.match(clean, /\*\*2\*\* scripts · \*\*3\*\* unique module dependencies · \*\*0\*\* issues/)
   assert.match(clean, /### Issues\n\nNo issues found\./)
+})
+
+// ── D2 (adversarial pass): tags must live in a comment block ─────────────
+// Recognition used to regex the raw source, so a string literal merely
+// mentioning the tags — or this repo's own test file, whose fixtures are
+// string constants — counted as a SuiteScript. Tags inside strings,
+// template literals, and prose outside comments must not count.
+
+const STRING_LITERAL_ONLY = `
+  const sample = '/** @NApiVersion 2.1 @NScriptType Restlet */'
+  console.log(sample)
+`
+
+const TEST_FILE_STYLE = `
+  const ANNOTATED = (type) => '/** @NApiVersion 2.1 @NScriptType ' + type + ' */'
+`
+
+test('D2: tags inside a string literal do not make a file a SuiteScript', () => {
+  assert.equal(hasSuiteScriptAnnotations(STRING_LITERAL_ONLY), false)
+})
+
+test('D2: tags inside a template literal do not make a file a SuiteScript', () => {
+  const src = 'const sample = `/** @NApiVersion 2.1 @NScriptType Restlet */`\n'
+  assert.equal(hasSuiteScriptAnnotations(src), false)
+})
+
+test('D2: a test-file-style fixture builder is not a SuiteScript', () => {
+  assert.equal(hasSuiteScriptAnnotations(TEST_FILE_STYLE), false)
+})
+
+test('D2: the two tags in separate comments do not make a SuiteScript', () => {
+  const src = '/** @NApiVersion 2.1 */\n/** @NScriptType Restlet */\nvar x = 1\n'
+  assert.equal(hasSuiteScriptAnnotations(src), false)
+})
+
+test('D2: findSuiteScriptFiles skips tag-bearing strings, keeps real headers', async () => {
+  const dir = await tempDir()
+  await writeFile(dir, 'sample_string.js', STRING_LITERAL_ONLY)
+  await writeFile(dir, 'real.js', ANNOTATED('Restlet'))
+  const found = await findSuiteScriptFiles(dir)
+  assert.deepEqual(found.map((f) => f.relFile), ['real.js'])
+})
+
+// ── D11 (adversarial pass): the version token is read, not reshaped ──────
+// A bare "x" used to satisfy recognition, and a suffix such as -beta was
+// silently truncated in the report.
+
+test('D11: a non-canonical version renders raw, never truncated', () => {
+  assert.equal(extractApiVersion('/** @NApiVersion 2.1-beta */'), '2.1-beta')
+})
+
+test('D11: a version token with no digit is not a version', () => {
+  const src = '/** @NApiVersion x @NScriptType Suitelet */\nvar x = 1\n'
+  assert.equal(extractApiVersion(src), null)
+  assert.equal(hasSuiteScriptAnnotations(src), false)
+})
+
+test('D11: analyze counts a 2.1-beta file and reports the version truthfully', async () => {
+  const dir = await tempDir()
+  await writeFile(dir, 'beta.js', ANNOTATED('Suitelet', '2.1-beta'))
+  await writeFile(dir, 'notaversion.js', ANNOTATED('Suitelet', 'x'))
+  const result = await analyze(dir)
+  assert.equal(result.mode, 'loose')
+  assert.equal(result.stats.scriptCount, 1)
+  assert.equal(result.scripts[0].file, 'beta.js')
+  assert.equal(result.scripts[0].apiVersion, '2.1-beta')
+})
+
+// ── D10 (adversarial pass): loose dependency forms resolve statically ────
+
+test('D10: extractLooseDependencies resolves variable and spread define forms', () => {
+  const src = `
+    var deps = ['N/record', 'N/search']
+    var more = ['N/email']
+    define(deps, function () {})
+    define([...more, 'N/log'], function () {})
+  `
+  assert.deepEqual(extractLooseDependencies(parseSnippet(src)), [
+    'N/email', 'N/log', 'N/record', 'N/search',
+  ])
+})
+
+test('D10: extractLooseDependencies reads substitution-free template literals in require', () => {
+  const src = "var a = require('N/record')\nvar b = require(`N/https`)\n"
+  assert.deepEqual(extractLooseDependencies(parseSnippet(src)), ['N/https', 'N/record'])
+})
+
+test('D10: an unreadable require marks the declaration incomplete', () => {
+  const src = 'var chosen = pick()\nvar r = require(chosen)\n'
+  const detailed = extractLooseDependenciesDetailed(parseSnippet(src))
+  assert.deepEqual(detailed.dependencies, [])
+  assert.equal(detailed.incomplete, true)
+})
+
+test('D10: analyze flags a loose script whose dependencies could not be fully read', async () => {
+  const dir = await tempDir()
+  await writeFile(
+    dir,
+    'dynamic.js',
+    `${ANNOTATED('Suitelet')}var chosen = pick()\nvar r = require(chosen)\n`,
+  )
+  const result = await analyze(dir)
+  assert.equal(result.stats.scriptCount, 1)
+  assert.equal(result.scripts[0].dependenciesIncomplete, true)
+})
+
+// ── D8 (adversarial pass): loose tree walk reports skipped symlinks ──────
+// A symlinked directory used to contribute nothing and say nothing; a
+// cyclic link never hangs because links are never followed.
+
+test('D8: loose mode counts real files and reports symlinked entries as skipped', async () => {
+  const dir = await tempDir()
+  await writeFile(dir, 'real-scripts/a.js', ANNOTATED('Restlet'))
+  await writeFile(dir, 'real-scripts/b.js', ANNOTATED('Suitelet'))
+  await writeFile(dir, 'realfile.js', ANNOTATED('ClientScript'))
+  await fs.symlink(path.join(dir, 'real-scripts'), path.join(dir, 'linkdir'), 'dir')
+  await fs.symlink(path.join(dir, 'realfile.js'), path.join(dir, 'linkfile.js'))
+  const result = await analyze(dir)
+  assert.equal(result.mode, 'loose')
+  assert.equal(result.stats.scriptCount, 3)
+  assert.deepEqual(result.skippedSymlinks, ['linkdir', 'linkfile.js'])
+})
+
+test('D8: a cyclic symlink terminates and contributes nothing', async () => {
+  const dir = await tempDir()
+  await writeFile(dir, 'circ/only.js', ANNOTATED('Restlet'))
+  await fs.symlink(path.join(dir, 'circ'), path.join(dir, 'circ', 'loop'), 'dir')
+  const result = await analyze(dir)
+  assert.equal(result.stats.scriptCount, 1)
+  assert.deepEqual(result.skippedSymlinks, ['circ/loop'])
 })
