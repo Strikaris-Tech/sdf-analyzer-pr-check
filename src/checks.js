@@ -56,6 +56,18 @@ const CHECK_NAMES = [
 const MAX_CHECK_FILES = 100
 const MAX_CHECK_FILE_BYTES = 524288 // 512 KB, per file version
 
+// TypeScript files are never examined — the checks read JavaScript —
+// but they are counted and disclosed as not examined (the v1.2.2
+// honesty fix), never passed over silently: a reader must not be
+// able to believe a changed file was examined when it was not read
+// at all. Real TypeScript support (reading the files by converting
+// them first) is a separate step and is not claimed here.
+const TYPESCRIPT_SUFFIXES = ['.ts', '.tsx']
+
+function isTypeScriptPath(p) {
+  return TYPESCRIPT_SUFFIXES.some((s) => p.endsWith(s))
+}
+
 // The free surface's own one-line message per check, written for a
 // developer reading a pull request. One fixed sentence per check.
 const CHECK_MESSAGES = {
@@ -644,9 +656,18 @@ function subtractFindings(headFindings, baseFindings) {
 //   skipped: null,
 //   findings: [{ check, file, line, message, onAddedLine }],
 //   changedCount, examinedCount, notCompared, notExamined,
+//   notExaminedTypeScript,
 //   diagrams: [{ file, participants, entryPoints, calls,
-//                ambiguousCalls, overCap }],   // one per examined file
-// }
+//                ambiguousCalls, overCap }],   // one per examined file,
+// }                                            // plus one flagged
+//                                              // record per changed
+//                                              // TypeScript file
+//
+// changedCount counts every changed script file in scope for the
+// mode, TypeScript files included: they are part of the change's
+// accounting even though they are never examined, and the gap
+// between changedCount and examinedCount is what the comment's
+// disclosure lines explain.
 //
 // The diagrams ride along with the examination: the same head sources
 // are already read and parsed here, and src/diagram.js reads each one
@@ -672,6 +693,7 @@ async function runPatternChecks({
   // head version that are script files for this mode. Deleted files
   // cannot introduce a presence finding and are excluded entirely.
   const population = []
+  const typeScriptFiles = []
   const headSources = new Map()
   const live = changesFiles
     .filter((f) => f.kind !== 'deleted')
@@ -681,14 +703,23 @@ async function runPatternChecks({
 
   for (const f of live) {
     if (mode === 'project') {
-      if (!suiteRootRel || !f.displayPath.endsWith('.js')) continue
+      if (!suiteRootRel) continue
       if (f.displayPath !== suiteRootRel && !f.displayPath.startsWith(`${suiteRootRel}/`)) continue
-      population.push(f)
+      if (f.displayPath.endsWith('.js')) {
+        population.push(f)
+      } else if (isTypeScriptPath(f.displayPath)) {
+        // In scope for the mode, and a script file by position — but
+        // TypeScript, so counted as not examined, never read.
+        typeScriptFiles.push(f.displayPath)
+      }
     } else {
-      if (!f.displayPath.endsWith('.js')) continue
+      const isJavaScript = f.displayPath.endsWith('.js')
+      if (!isJavaScript && !isTypeScriptPath(f.displayPath)) continue
       if (f.displayPath.split('/').some((seg) => EXCLUDED_DIRS.has(seg))) continue
       // Loose mode recognises scripts by their annotations; a changed
       // file without them is not a script file and is not counted.
+      // The annotation read is a text read, so it works the same for
+      // a TypeScript file as for a JavaScript one.
       let source
       try {
         source = await readHeadFile(f.repoPath)
@@ -696,8 +727,12 @@ async function runPatternChecks({
         continue
       }
       if (!hasSuiteScriptAnnotations(source)) continue
-      headSources.set(f.repoPath, source)
-      population.push(f)
+      if (isJavaScript) {
+        headSources.set(f.repoPath, source)
+        population.push(f)
+      } else {
+        typeScriptFiles.push(f.displayPath)
+      }
     }
   }
 
@@ -788,14 +823,32 @@ async function runPatternChecks({
     || a.line - b.line
     || (a.check < b.check ? -1 : a.check > b.check ? 1 : 0))
 
+  // One flagged record per changed TypeScript file, merged with the
+  // examined files' records in path order, so the diagram section
+  // accounts for each TypeScript file as not examined (its closing
+  // accounting reconciles with the change, as it does for examined
+  // files) instead of letting it vanish from the section entirely.
+  const typeScriptRecords = typeScriptFiles.map((file) => ({
+    file,
+    participants: [],
+    entryPoints: [],
+    calls: [],
+    ambiguousCalls: 0,
+    overCap: false,
+    notExaminedTypeScript: true,
+  }))
+  const allDiagrams = [...diagrams, ...typeScriptRecords]
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+
   return {
     skipped: null,
     findings,
-    changedCount: population.length,
+    changedCount: population.length + typeScriptFiles.length,
     examinedCount,
     notCompared,
     notExamined,
-    diagrams,
+    notExaminedTypeScript: typeScriptFiles.length,
+    diagrams: allDiagrams,
   }
 }
 
@@ -820,4 +873,5 @@ module.exports = {
   analyzeAuthUrl,
   isLikelyHardcodedSecret,
   isSensitiveName,
+  isTypeScriptPath,
 }

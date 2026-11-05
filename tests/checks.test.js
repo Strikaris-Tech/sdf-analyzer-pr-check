@@ -15,6 +15,7 @@ const {
   detectFindings,
   subtractFindings,
   runPatternChecks,
+  isTypeScriptPath,
 } = require('../src/checks')
 
 const HEADER = '/**\n * @NApiVersion 2.1\n * @NScriptType UserEventScript\n */\n'
@@ -460,4 +461,112 @@ test('orchestration: a deleted file is never in the population', async () => {
     readBaseFile: async () => CATCH_FILE(11),
   })
   assert.equal(result.changedCount, 0)
+})
+
+// ---------- TypeScript files: counted, disclosed, never examined -----
+// The v1.2.2 honesty fix. Before it, a changed TypeScript file never
+// entered the accounting at all — a mixed pull request read as fully
+// examined and a TypeScript-only one as an empty, finding-free pass.
+
+const TS_FILE = HEADER + `define(['N/log'], function (log) {
+  function afterSubmit(context: any): void {
+    try { risky(); } catch (e) {
+    }
+  }
+  function risky(): number { return 1; }
+  return { afterSubmit: afterSubmit };
+});
+`
+
+test('typescript: the suffix test admits .ts and .tsx and nothing else', () => {
+  assert.equal(isTypeScriptPath('a/b.ts'), true)
+  assert.equal(isTypeScriptPath('a/b.tsx'), true)
+  assert.equal(isTypeScriptPath('a/b.d.ts'), true)
+  assert.equal(isTypeScriptPath('a/b.js'), false)
+  assert.equal(isTypeScriptPath('a/b.ts.json'), false)
+  assert.equal(isTypeScriptPath('a/xts'), false)
+})
+
+test('typescript: a changed TypeScript file is counted as not examined and yields no findings', async () => {
+  const repoPath = 'src/FileCabinet/SuiteScripts/ue_order.ts'
+  const result = await runPatternChecks({
+    ...PROJECT,
+    changesFiles: [projectChange(repoPath, { kind: 'added', prevRepoPath: null })],
+    readHeadFile: async () => TS_FILE,
+    readBaseFile: async () => { throw new Error('must not be called for an added file') },
+  })
+  // The file carries an empty catch: examined, it would report one.
+  // It is TypeScript, so it is counted and disclosed — not examined.
+  assert.equal(result.findings.length, 0)
+  assert.equal(result.examinedCount, 0)
+  assert.equal(result.notExaminedTypeScript, 1)
+  assert.equal(result.changedCount, 1)
+  assert.equal(result.diagrams.length, 1)
+  assert.equal(result.diagrams[0].file, repoPath)
+  assert.equal(result.diagrams[0].notExaminedTypeScript, true)
+  assert.deepEqual(result.diagrams[0].calls, [])
+})
+
+test('typescript: a mixed change examines the JavaScript and counts the TypeScript beside it', async () => {
+  const jsPath = 'src/FileCabinet/SuiteScripts/a.js'
+  const tsPath = 'src/FileCabinet/SuiteScripts/b.ts'
+  const tsxPath = 'src/FileCabinet/SuiteScripts/c.tsx'
+  const result = await runPatternChecks({
+    ...PROJECT,
+    changesFiles: [
+      projectChange(tsxPath, { kind: 'added', prevRepoPath: null }),
+      projectChange(jsPath, { kind: 'added', prevRepoPath: null }),
+      projectChange(tsPath, { kind: 'added', prevRepoPath: null }),
+    ],
+    readHeadFile: async (p) => (p === jsPath ? CATCH_FILE(12) : TS_FILE),
+    readBaseFile: async () => { throw new Error('unused') },
+  })
+  assert.equal(result.examinedCount, 1)
+  assert.equal(result.notExaminedTypeScript, 2)
+  assert.equal(result.changedCount, 3)
+  assert.equal(result.findings.length, 1)
+  assert.equal(result.findings[0].file, jsPath)
+  // The diagram records reconcile with the change, in path order:
+  // the examined file's record, then one flagged record per
+  // TypeScript file.
+  assert.deepEqual(
+    result.diagrams.map((d) => [d.file, d.notExaminedTypeScript === true]),
+    [[jsPath, false], [tsPath, true], [tsxPath, true]],
+  )
+})
+
+test('typescript: files outside the SuiteScripts root, and deleted ones, are not counted', async () => {
+  const result = await runPatternChecks({
+    ...PROJECT,
+    changesFiles: [
+      projectChange('tools/build.ts', { kind: 'added', prevRepoPath: null }),
+      projectChange('src/FileCabinet/SuiteScripts/gone.ts', { kind: 'deleted' }),
+    ],
+    readHeadFile: async () => TS_FILE,
+    readBaseFile: async () => TS_FILE,
+  })
+  assert.equal(result.notExaminedTypeScript, 0)
+  assert.equal(result.changedCount, 0)
+  assert.deepEqual(result.diagrams, [])
+})
+
+test('typescript: loose mode counts an annotated TypeScript file, and only an annotated one', async () => {
+  const plainTs = 'export function helper(): number { return 1; }\n'
+  const result = await runPatternChecks({
+    mode: 'loose',
+    projectPrefix: '',
+    suiteRootRel: null,
+    changesFiles: [
+      projectChange('scripts/annotated.ts', { kind: 'added', prevRepoPath: null }),
+      projectChange('scripts/plain.ts', { kind: 'added', prevRepoPath: null }),
+    ],
+    readHeadFile: async (p) => (p.endsWith('annotated.ts') ? TS_FILE : plainTs),
+    readBaseFile: async () => { throw new Error('unused') },
+  })
+  assert.equal(result.notExaminedTypeScript, 1)
+  assert.equal(result.changedCount, 1)
+  assert.equal(result.examinedCount, 0)
+  assert.equal(result.diagrams.length, 1)
+  assert.equal(result.diagrams[0].file, 'scripts/annotated.ts')
+  assert.equal(result.diagrams[0].notExaminedTypeScript, true)
 })
