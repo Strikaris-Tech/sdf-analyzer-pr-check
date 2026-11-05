@@ -1095,3 +1095,60 @@ test('render: renderSummary carries the key when a diagram is drawn', () => {
   assert.ok(md.includes(DIAGRAM_KEY_SEMANTICS))
   assert.ok(md.includes('```mermaid'))
 })
+
+// ---------- v1.2.2: TypeScript files in the diagram accounting -------
+// A changed TypeScript file was never examined, so no diagram exists
+// for it — but the section accounts for it as not examined (the
+// honesty fix), in every rendering mode, instead of letting it
+// vanish from the section's reconciliation with the change.
+
+const TS_RECORD = {
+  file: 'src/FileCabinet/SuiteScripts/ue_order.ts',
+  participants: [],
+  entryPoints: [],
+  calls: [],
+  ambiguousCalls: 0,
+  overCap: false,
+  notExaminedTypeScript: true,
+}
+
+test('render: a TypeScript record is accounted as not examined and never drawn', () => {
+  const text = renderDiagramSection([TS_RECORD]).join('\n')
+  assert.match(text, /### Call diagrams for changed files/)
+  assert.match(text, /No diagram for 1 changed file: it is a TypeScript file and was not examined\./)
+  assert.ok(!text.includes('```mermaid'))
+  assert.ok(text.includes(DIAGRAM_SCOPE_NOTE))
+})
+
+test('render: a TypeScript file beside a drawn diagram is counted as an other changed file', () => {
+  const text = renderDiagramSection([sampleDiagram(), TS_RECORD]).join('\n')
+  assert.ok(text.includes('```mermaid'))
+  assert.match(text, /No diagram for 1 other changed file: it is a TypeScript file and was not examined\./)
+})
+
+test('render: the TypeScript accounting survives the omitted (budget) rendering', () => {
+  const text = renderDiagramSection([TS_RECORD], 'omitted').join('\n')
+  assert.match(text, /No diagram for 1 changed file: it is a TypeScript file and was not examined\./)
+  assert.ok(text.includes(DIAGRAM_SCOPE_NOTE))
+})
+
+test('integration: a changed TypeScript file contributes a flagged record and is not examined', async () => {
+  const repoPath = 'src/FileCabinet/SuiteScripts/ue_order.ts'
+  const tsSource = HEADER + `define([], function () {
+  function afterSubmit(context: any): void { return; }
+  return { afterSubmit: afterSubmit };
+});
+`
+  const result = await runPatternChecks({
+    ...PROJECT,
+    changesFiles: [projectChange(repoPath, { kind: 'added', prevRepoPath: null })],
+    readHeadFile: async () => tsSource,
+    readBaseFile: async () => { throw new Error('must not be called') },
+  })
+  assert.equal(result.examinedCount, 0)
+  assert.equal(result.notExaminedTypeScript, 1)
+  assert.equal(result.diagrams.length, 1)
+  assert.equal(result.diagrams[0].file, repoPath)
+  assert.equal(result.diagrams[0].notExaminedTypeScript, true)
+  assert.deepEqual(result.diagrams[0].calls, [])
+})

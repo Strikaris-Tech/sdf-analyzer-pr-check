@@ -417,6 +417,24 @@ test('R1: un-compared and un-examined files are disclosed in the section', () =>
   assert.match(md, /2 changed files could not be examined \(too large, or not valid JavaScript\) and were not checked/)
 })
 
+test('R1: changed TypeScript files are disclosed as not examined (v1.2.2 honesty fix)', () => {
+  const md = renderSummary(sampleResult(checksResult({
+    findings: [], examinedCount: 1, changedCount: 3, notExaminedTypeScript: 2,
+  })))
+  // The header arithmetic includes the TypeScript files in the
+  // changed count, and the disclosure line names the reason.
+  assert.match(md, /ran on \*\*1\*\* of \*\*3\*\* changed script files: no new findings\./)
+  assert.match(md, /2 changed files are TypeScript and were not examined — the pattern checks read JavaScript only\./)
+  assert.ok(md.includes(FINDINGS_SCOPE_SENTENCE))
+})
+
+test('R1: a single changed TypeScript file takes the singular disclosure', () => {
+  const md = renderSummary(sampleResult(checksResult({
+    findings: [], examinedCount: 0, changedCount: 1, notExaminedTypeScript: 1,
+  })))
+  assert.match(md, /1 changed file is TypeScript and was not examined — the pattern checks read JavaScript only\./)
+})
+
 test('R1: a full findings section still renders within the comment budget', () => {
   const result = hostileResult({ scriptCount: 50, warningCount: 25 })
   const deep = `${Array.from({ length: 40 }, (_, d) => `segment${d}`).join('/')}/file.js`
