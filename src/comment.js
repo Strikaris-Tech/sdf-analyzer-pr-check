@@ -357,6 +357,14 @@ function renderChecksSection(checks, findingRowLimit) {
     )
     lines.push('')
   }
+  if (checks.notExaminedTypeScript > 0) {
+    const n = checks.notExaminedTypeScript
+    lines.push(
+      `_${n} changed file${plural(n)} ${n === 1 ? 'is' : 'are'} TypeScript and ` +
+      `${n === 1 ? 'was' : 'were'} not examined — the pattern checks read JavaScript only._`,
+    )
+    lines.push('')
+  }
   lines.push(FINDINGS_SCOPE_SENTENCE)
   lines.push('')
   return lines
@@ -372,14 +380,19 @@ function renderChecksSection(checks, findingRowLimit) {
 // accounted for (diagram audit F-A3/F-C1): named here when it is
 // drawn, omitted for size, or carrying calls omitted for ambiguity —
 // and otherwise counted in the closing line for files with no direct
-// intra-file calls. The scope note closes every rendering, including
-// the omitted one.
+// intra-file calls. Changed TypeScript files stand outside the
+// examination entirely (the v1.2.2 honesty fix): their flagged
+// records are counted in their own closing line as not examined, in
+// every mode, so they never vanish from the section's accounting.
+// The scope note closes every rendering, including the omitted one.
 function renderDiagramSection(diagrams, diagramMode = 'full') {
   const records = (diagrams || []).filter((d) => d && typeof d === 'object')
   if (records.length === 0) return []
 
-  const named = records.filter((d) => isNamedDiagramRecord(d))
-  const uncalled = records.filter((d) => !isNamedDiagramRecord(d))
+  const typeScript = records.filter((d) => d.notExaminedTypeScript)
+  const examinedRecords = records.filter((d) => !d.notExaminedTypeScript)
+  const named = examinedRecords.filter((d) => isNamedDiagramRecord(d))
+  const uncalled = examinedRecords.filter((d) => !isNamedDiagramRecord(d))
 
   const lines = []
   lines.push('### Call diagrams for changed files')
@@ -391,6 +404,10 @@ function renderDiagramSection(diagrams, diagramMode = 'full') {
     }
     if (uncalled.length > 0) {
       lines.push(noDiagramLine(uncalled.length, named.length > 0))
+      lines.push('')
+    }
+    if (typeScript.length > 0) {
+      lines.push(typeScriptDiagramLine(typeScript.length, named.length > 0 || uncalled.length > 0))
       lines.push('')
     }
     lines.push(DIAGRAM_SCOPE_NOTE)
@@ -416,6 +433,10 @@ function renderDiagramSection(diagrams, diagramMode = 'full') {
     lines.push(noDiagramLine(uncalled.length, named.length > 0))
     lines.push('')
   }
+  if (typeScript.length > 0) {
+    lines.push(typeScriptDiagramLine(typeScript.length, named.length > 0 || uncalled.length > 0))
+    lines.push('')
+  }
   lines.push(DIAGRAM_SCOPE_NOTE)
   lines.push('')
   return lines
@@ -439,6 +460,18 @@ function noDiagramLine(count, anyNamed) {
     `_No diagram for ${count} ${anyNamed ? 'other ' : ''}changed ` +
     `file${plural(count)}: ${count === 1 ? 'it makes' : 'they make'} ` +
     'no direct calls between functions within the file._'
+  )
+}
+
+// The closing accounting line for changed TypeScript files: no
+// diagram was drawn for them because they were not examined at all —
+// the checks and the diagram read JavaScript only — and the section
+// says so with a count rather than letting the files pass unmentioned.
+function typeScriptDiagramLine(count, anyOther) {
+  return (
+    `_No diagram for ${count} ${anyOther ? 'other ' : ''}changed ` +
+    `file${plural(count)}: ${count === 1 ? 'it is a TypeScript file' : 'they are TypeScript files'} ` +
+    `and ${count === 1 ? 'was' : 'were'} not examined._`
   )
 }
 
