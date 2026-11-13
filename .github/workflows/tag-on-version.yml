@@ -59,7 +59,7 @@ jobs:
 
       - name: Create the release tag
         if: steps.tagcheck.outputs.exists == 'false'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           TAG: ${{ steps.version.outputs.tag }}
         with:
