@@ -14,10 +14,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Scan src/ and tests/ for private-package references
         run: |
-          # This action is the free tier — the engine stays private by staying
-          # separate. If this job fails, someone imported from a private
-          # Strikaris package. Keep the private logic in netsuite-sdf-analyzer /
-          # strikaris-kernel / strikaris-backend / mirroros.
+          # Guard: this repository must not reference private packages.
+          # If this job fails, a private package reference was added to
+          # src/ or tests/. Remove the reference to restore the boundary.
           PATTERN='@strikaris/|netsuite-sdf-analyzer|strikaris-kernel|strikaris-backend|mirroros'
           if grep -rnE "$PATTERN" src/ tests/ 2>/dev/null; then
             echo "::error::Private Strikaris package reference detected above."
