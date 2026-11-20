@@ -14,14 +14,14 @@
 // src/analyzer.js and src/checks.js, and all rendering in
 // src/comment.js.
 
-const fs = require('node:fs/promises')
-const path = require('node:path')
-const core = require('@actions/core')
-const github = require('@actions/github')
-const { analyze, assertUsableProjectRoot, findSuiteScriptsRoot } = require('./analyzer')
-const { getPullRequestChanges, readBaseVersion } = require('./changes')
-const { runPatternChecks } = require('./checks')
-const { renderSummary, upsertComment } = require('./comment')
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import * as core from '@actions/core'
+import * as github from '@actions/github'
+import { analyze, assertUsableProjectRoot, findSuiteScriptsRoot } from './analyzer.js'
+import { getPullRequestChanges, readBaseVersion } from './changes.js'
+import { runPatternChecks } from './checks.js'
+import { renderSummary, upsertComment } from './comment.js'
 
 const COMMENT_MODES = new Set(['sticky', 'new', 'off'])
 

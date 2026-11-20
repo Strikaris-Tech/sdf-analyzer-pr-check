@@ -3,15 +3,15 @@
 // builds a temporary repository, commits a base, commits a change,
 // and reads the change set back through the module.
 
-const test = require('node:test')
-const assert = require('node:assert/strict')
-const fs = require('node:fs/promises')
-const os = require('node:os')
-const path = require('node:path')
-const { execFile } = require('node:child_process')
-const { promisify } = require('node:util')
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
-const { getPullRequestChanges, readBaseVersion, parseDiff } = require('../src/changes')
+import { getPullRequestChanges, readBaseVersion, parseDiff } from '../src/changes.js'
 
 const exec = promisify(execFile)
 

@@ -1,9 +1,9 @@
 // Unit tests for summary rendering and comment posting (src/comment.js).
 
-const test = require('node:test')
-const assert = require('node:assert/strict')
+import test from 'node:test'
+import assert from 'node:assert/strict'
 
-const { COMMENT_MARKER, PUBLISHER_LINE, MAX_COMMENT_CHARS, renderSummary, truncateToBudget, upsertComment } = require('../src/comment')
+import { COMMENT_MARKER, PUBLISHER_LINE, MAX_COMMENT_CHARS, renderSummary, truncateToBudget, upsertComment } from '../src/comment.js'
 
 function sampleResult(overrides = {}) {
   return {
@@ -334,7 +334,7 @@ test('D10: fully read declarations carry no marker and no footnote', () => {
 // fail-on-issues), rendered only when the run carried checks data,
 // always enumerating what ran and closing with the scope sentence.
 
-const { MAX_FINDING_ROWS, FINDINGS_SCOPE_SENTENCE } = require('../src/comment')
+import { MAX_FINDING_ROWS, FINDINGS_SCOPE_SENTENCE } from '../src/comment.js'
 
 function checksResult(overrides = {}) {
   return {
