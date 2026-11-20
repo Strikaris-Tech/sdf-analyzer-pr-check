@@ -1,7 +1,7 @@
 {
   "name": "sdf-analyzer-pr-check",
   "version": "1.2.2",
-  "description": "SDF Analyzer — PR Check by Strikaris — a GitHub Action that analyzes NetSuite SuiteCloud SDF projects and posts a visual pull-request summary.",
+  "description": "SDF Analyzer \u2014 PR Check by Strikaris \u2014 a GitHub Action that analyzes NetSuite SuiteCloud SDF projects and posts a visual pull-request summary.",
   "private": true,
   "main": "dist/index.js",
   "author": "Strikaris",
@@ -15,8 +15,8 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@actions/core": "^1.10.1",
-    "@actions/github": "^6.0.0",
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
     "acorn": "^8.11.3",
     "acorn-walk": "^8.3.2",
     "xml2js": "^0.6.2"
@@ -36,5 +36,6 @@
     "github-action",
     "dependency-analysis",
     "pull-request"
-  ]
+  ],
+  "type": "module"
 }

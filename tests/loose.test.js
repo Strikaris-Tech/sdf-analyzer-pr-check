@@ -1,24 +1,26 @@
 // Unit tests for loose-file mode: SuiteScript recognition (src/suitescript.js),
+import { fileURLToPath } from 'node:url'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // mode selection in analyze(), and the loose / empty / outside-note rendering.
 // Run with: node --test tests/
 
-const test = require('node:test')
-const assert = require('node:assert/strict')
-const fs = require('node:fs/promises')
-const os = require('node:os')
-const path = require('node:path')
-const acorn = require('acorn')
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import * as acorn from 'acorn'
 
-const {
+import {
   extractApiVersion,
   extractScriptTypeTag,
   hasSuiteScriptAnnotations,
   extractLooseDependencies,
   extractLooseDependenciesDetailed,
   findSuiteScriptFiles,
-} = require('../src/suitescript')
-const { analyze } = require('../src/analyzer')
-const { renderSummary } = require('../src/comment')
+} from '../src/suitescript.js'
+import { analyze } from '../src/analyzer.js'
+import { renderSummary } from '../src/comment.js'
 
 const FIXTURES = path.join(__dirname, 'fixtures')
 const MINIMAL = path.join(FIXTURES, 'minimal-sdf')

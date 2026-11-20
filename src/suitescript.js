@@ -5,10 +5,10 @@
 // anywhere in a repository tree. Project analysis lives in analyzer.js;
 // this module knows nothing about SDF projects, manifests, or warnings.
 
-const fs = require('node:fs/promises')
-const path = require('node:path')
-const acorn = require('acorn')
-const walk = require('acorn-walk')
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import * as acorn from 'acorn'
+import * as walk from 'acorn-walk'
 
 // The recognition markers. A file counts as a SuiteScript only when ONE
 // block comment — its JSDoc header — carries BOTH SuiteScript
@@ -312,7 +312,7 @@ async function isSkippedSymlink(full, name) {
   }
 }
 
-module.exports = {
+export {
   EXCLUDED_DIRS,
   extractApiVersion,
   extractScriptTypeTag,

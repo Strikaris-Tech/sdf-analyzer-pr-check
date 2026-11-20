@@ -11,12 +11,12 @@
 // This file owns its own logic; it does not import from any private
 // Strikaris package. The engine stays private by staying separate.
 
-const fs = require('node:fs/promises')
-const path = require('node:path')
-const acorn = require('acorn')
-const walk = require('acorn-walk')
-const { parseStringPromise } = require('xml2js')
-const {
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import * as acorn from 'acorn'
+import * as walk from 'acorn-walk'
+import { parseStringPromise } from 'xml2js'
+import {
   extractApiVersion,
   extractScriptTypeTag,
   extractLooseDependenciesDetailed,
@@ -24,7 +24,7 @@ const {
   resolveCallModules,
   scanSuiteScriptTree,
   isSkippedSymlink,
-} = require('./suitescript')
+} from './suitescript.js'
 
 const SUITESCRIPT_TYPES = new Set([
   'ClientScript', 'UserEventScript', 'Suitelet', 'ScheduledScript',
@@ -458,7 +458,7 @@ function sortDesc(map) {
     .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
 }
 
-module.exports = {
+export {
   analyze,
   // exported for tests:
   assertUsableProjectRoot,

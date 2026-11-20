@@ -26,17 +26,17 @@
 // This file owns its own logic; it does not import from any private
 // Strikaris package. The engine stays private by staying separate.
 
-const acorn = require('acorn')
-const walk = require('acorn-walk')
-const {
+import * as acorn from 'acorn'
+import * as walk from 'acorn-walk'
+import {
   EXCLUDED_DIRS,
   extractApiVersion,
   hasSuiteScriptAnnotations,
   collectArrayBindings,
   resolveCallModules,
-} = require('./suitescript')
-const { guessScriptType, extractExports } = require('./analyzer')
-const { extractCallDiagram } = require('./diagram')
+} from './suitescript.js'
+import { guessScriptType, extractExports } from './analyzer.js'
+import { extractCallDiagram } from './diagram.js'
 
 // The six checks, fixed by name in the product ruling. The header line
 // of the comment's checks section counts this list, so the number a
@@ -860,7 +860,7 @@ function displayPathOf(repoPath, projectPrefix) {
   return repoPath.slice(projectPrefix.length)
 }
 
-module.exports = {
+export {
   CHECK_NAMES,
   CHECK_MESSAGES,
   MAX_CHECK_FILES,

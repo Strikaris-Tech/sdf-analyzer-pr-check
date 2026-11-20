@@ -25,8 +25,8 @@
 // This file owns its own logic; it does not import from any private
 // Strikaris package. The engine stays private by staying separate.
 
-const acorn = require('acorn')
-const walk = require('acorn-walk')
+import * as acorn from 'acorn'
+import * as walk from 'acorn-walk'
 
 // Caps, as named constants in the family the checks and the comment
 // renderer keep. A file whose drawn diagram would exceed either cap
@@ -326,7 +326,7 @@ function propertyKeyName(key) {
   return null
 }
 
-module.exports = {
+export {
   MAX_DIAGRAM_PARTICIPANTS,
   MAX_DIAGRAM_CALLS,
   extractCallDiagram,

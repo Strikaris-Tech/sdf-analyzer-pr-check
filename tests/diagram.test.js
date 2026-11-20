@@ -6,15 +6,15 @@
 // derived from the reduced form's scope — direct calls between
 // functions within one file, nothing else.
 
-const test = require('node:test')
-const assert = require('node:assert/strict')
+import test from 'node:test'
+import assert from 'node:assert/strict'
 
-const {
+import {
   MAX_DIAGRAM_PARTICIPANTS,
   MAX_DIAGRAM_CALLS,
   extractCallDiagram,
-} = require('../src/diagram')
-const {
+} from '../src/diagram.js'
+import {
   MAX_COMMENT_CHARS,
   DIAGRAM_SCOPE_NOTE,
   DIAGRAM_KEY,
@@ -23,8 +23,8 @@ const {
   renderDiagramSection,
   sanitizeDiagramLabel,
   truncateToBudget,
-} = require('../src/comment')
-const { runPatternChecks } = require('../src/checks')
+} from '../src/comment.js'
+import { runPatternChecks } from '../src/checks.js'
 
 const HEADER = '/**\n * @NApiVersion 2.1\n * @NScriptType UserEventScript\n */\n'
 

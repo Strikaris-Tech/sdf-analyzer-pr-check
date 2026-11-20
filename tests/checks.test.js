@@ -1,14 +1,16 @@
 // Tests for the R1 presence checks (src/checks.js): the detector
+import { fileURLToPath } from 'node:url'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // corpus, the introduced-only subtraction, and the examination
 // orchestration. Fixture expectations were verified against the
 // design's per-check semantics before being pinned here.
 
-const test = require('node:test')
-const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const path = require('node:path')
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 
-const {
+import {
   CHECK_NAMES,
   MAX_CHECK_FILES,
   MAX_CHECK_FILE_BYTES,
@@ -16,7 +18,7 @@ const {
   subtractFindings,
   runPatternChecks,
   isTypeScriptPath,
-} = require('../src/checks')
+} from '../src/checks.js'
 
 const HEADER = '/**\n * @NApiVersion 2.1\n * @NScriptType UserEventScript\n */\n'
 

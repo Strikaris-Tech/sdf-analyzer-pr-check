@@ -1,14 +1,16 @@
 // Unit tests for the free-tier engine (src/analyzer.js).
+import { fileURLToPath } from 'node:url'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Run with: node --test tests/
 
-const test = require('node:test')
-const assert = require('node:assert/strict')
-const fs = require('node:fs/promises')
-const os = require('node:os')
-const path = require('node:path')
-const acorn = require('acorn')
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import * as acorn from 'acorn'
 
-const {
+import {
   analyze,
   assertUsableProjectRoot,
   readManifest,
@@ -17,7 +19,7 @@ const {
   extractDependenciesDetailed,
   extractExports,
   guessScriptType,
-} = require('../src/analyzer')
+} from '../src/analyzer.js'
 
 const FIXTURES = path.join(__dirname, 'fixtures')
 const MINIMAL = path.join(FIXTURES, 'minimal-sdf')

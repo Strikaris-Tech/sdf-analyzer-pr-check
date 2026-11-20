@@ -13,7 +13,7 @@
 // own. When the base cannot be obtained, the result says so plainly
 // and the caller degrades: no findings, a printed reason, no failure.
 
-const { execFile } = require('node:child_process')
+import { execFile } from 'node:child_process'
 
 // One diff over the largest pull request the checks accept (100 files,
 // both versions near the byte cap) is a few megabytes; git show of one
@@ -226,7 +226,7 @@ function unquoteGitPath(p) {
   return Buffer.from(bytes).toString('utf8')
 }
 
-module.exports = {
+export {
   MAX_GIT_BUFFER_BYTES,
   makeGitRunner,
   getPullRequestChanges,

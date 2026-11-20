@@ -2,8 +2,8 @@
 // SDF action. Rendering is pure (no I/O) so it is unit-testable; comment
 // posting takes an octokit-shaped client so tests can substitute a fake.
 
-const path = require('node:path')
-const { MAX_DIAGRAM_PARTICIPANTS, MAX_DIAGRAM_CALLS } = require('./diagram')
+import path from 'node:path'
+import { MAX_DIAGRAM_PARTICIPANTS, MAX_DIAGRAM_CALLS } from './diagram.js'
 
 // Hidden marker embedded in every comment this action posts, so sticky mode
 // can find (and update) its own previous comment on a pull request.
@@ -721,7 +721,7 @@ async function findOwnComment(issues, { owner, repo, issueNumber }) {
   }
 }
 
-module.exports = {
+export {
   COMMENT_MARKER,
   PUBLISHER_LINE,
   MAX_COMMENT_CHARS,
