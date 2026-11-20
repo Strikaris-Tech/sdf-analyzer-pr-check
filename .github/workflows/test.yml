@@ -11,7 +11,7 @@ jobs:
     name: No private Strikaris imports
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Scan src/ and tests/ for private-package references
         run: |
           # Guard: this repository must not reference private packages.
@@ -29,7 +29,7 @@ jobs:
     needs: [ip-boundary]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -41,7 +41,7 @@ jobs:
     name: dist/ is up to date
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -61,7 +61,7 @@ jobs:
     needs: [unit, dist-fresh]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run action against fixture
         uses: ./
         with:
